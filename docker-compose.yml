@@ -1,0 +1,29 @@
+services:
+  api:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_PATH: /data/vulnforge.db
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_app_key
+    ports: ["127.0.0.1:8000:8000"]
+    volumes:
+      - vulnforge_data:/data
+      - ./private-key.pem:/run/secrets/github_app_key:ro
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+  worker:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "vulnforge.worker"]
+    env_file: .env
+    environment:
+      DATABASE_PATH: /data/vulnforge.db
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_app_key
+    volumes:
+      - vulnforge_data:/data
+      - ./private-key.pem:/run/secrets/github_app_key:ro
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+volumes:
+  vulnforge_data:

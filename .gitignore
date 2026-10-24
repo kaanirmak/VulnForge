@@ -1,0 +1,23 @@
+.env
+*.pem
+__pycache__/
+.pytest_cache/
+*.pyc
+.venv/
+data/
+*.db
+
+# Sensitive local configuration and credentials
+.env.*
+!.env.example
+*.key
+*.p12
+*.pfx
+*.crt
+secrets/
+# Local build/test output
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
