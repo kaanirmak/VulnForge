@@ -1,0 +1,53 @@
+# Release template only. Do not activate until the fixed server origin, approved
+# scanner distribution and reusable workflow commit have been reviewed and pinned.
+name: VulnForge identity-verified runner
+on:
+  workflow_call:
+    inputs:
+      consent-metadata-upload:
+        description: The organization approved sending strict package/finding metadata to the fixed service.
+        required: true
+        type: boolean
+permissions:
+  contents: read
+  id-token: write
+jobs:
+  scan:
+    if: inputs.consent-metadata-upload && contains(fromJSON('["push","schedule","workflow_dispatch"]'), github.event_name) && github.ref_type == 'branch' && github.ref_protected
+    # Never route fork/PR code to a persistent or privileged runner.
+    runs-on: [self-hosted, linux, vulnforge]
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        kind: [code, dependencies]
+    env:
+      # Hardcode the approved origin in this reviewed reusable workflow before
+      # publishing. It is deliberately not a caller-controlled workflow input.
+      VF_SERVER: REPLACE_WITH_FIXED_HTTPS_ORIGIN
+      VF_REPOSITORY: ${{ github.repository }}
+      VF_SHA: ${{ github.sha }}
+      VF_KIND: ${{ matrix.kind }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+      - name: Scan and upload approved metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          report_dir="$(mktemp -d "$RUNNER_TEMP/vulnforge-XXXXXXXX")"
+          report="$report_dir/$VF_KIND.json"
+          cleanup() {
+            /opt/vulnforge/bin/python -I -m vulnforge.runner_cleanup --report "$report" --runner-temp "$RUNNER_TEMP" || true
+          }
+          trap cleanup EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          /opt/vulnforge/bin/python -I -m vulnforge.cli --root "$GITHUB_WORKSPACE" --repo "$VF_REPOSITORY" --sha "$VF_SHA" --kind "$VF_KIND" --output "$report"
+          /opt/vulnforge/bin/python -I -m vulnforge.runner_upload --report "$report" --server "$VF_SERVER" --consent-metadata-upload
+      # Each matrix job receives its own short-lived identity; no shared server
+      # key, source artifact, untrusted subprocess or automatic merge is used.

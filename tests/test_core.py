@@ -48,11 +48,12 @@ def test_fixed_version_candidate():
 
 def test_queue_is_durable_and_retries(tmp_path):
     store=Store(str(tmp_path/'a.db'))
+    store.upsert_repo('o/r',1,'main')
     assert store.enqueue('commit_scan','o/r',{'sha':'a'*40},'job1')
     assert not store.enqueue('commit_scan','o/r',{'sha':'a'*40},'job1')
     claimed=store.claim()
     assert claimed['kind']=='commit_scan'
-    store.finish(claimed['id'])
+    store.finish(claimed)
     assert store.claim() is None
     store.save_finding('o/r','dep:key','dependency','high','foo','requirements.txt','a'*40,{})
     assert store.list_rows('findings')[0]['status']=='open'

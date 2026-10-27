@@ -4,7 +4,7 @@ import uuid
 
 from fastapi.testclient import TestClient
 from vulnforge.api import create_app, signature_ok
-from vulnforge.config import Config
+from support import managed_config as Config
 from vulnforge.db import Store
 
 

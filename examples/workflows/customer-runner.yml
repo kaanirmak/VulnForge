@@ -1,0 +1,38 @@
+# Install an approved, pinned VulnForge runtime outside the checkout first.
+# This profile runs only trusted default-branch code on a dedicated customer runner.
+# Copy to .github/workflows/vulnforge.yml; set the scanner path and immutable Action ref.
+name: VulnForge customer runner
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: vulnforge-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  scan:
+    runs-on: [self-hosted, linux, vulnforge]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # verified v4.2.2
+        with:
+          persist-credentials: false
+          submodules: false
+          fetch-depth: 1
+      - id: scan
+        # Required before activation: replace OWNER/VulnForge and COMMIT_SHA with
+        # the reviewed Action repository and its full immutable commit SHA.
+        uses: OWNER/VulnForge@COMMIT_SHA
+        with:
+          scanner-python: /opt/vulnforge/bin/python
+          commit-sha: ${{ github.sha }}
+      # No upload, id-token:write, repository write or customer source artifact.
+      # Reports remain local; trusted OIDC ingestion is a separate release gate.
+      - if: always() && steps.scan.outputs.code-report != ''
+        env:
+          VF_REPORT: ${{ steps.scan.outputs.code-report }}
+        run: /opt/vulnforge/bin/python -I -m vulnforge.runner_cleanup --report "$VF_REPORT" --runner-temp "$RUNNER_TEMP"

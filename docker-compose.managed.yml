@@ -1,0 +1,16 @@
+# Explicit owner-consented managed scanning, layered over the private defaults:
+# docker compose -f docker-compose.yml -f docker-compose.managed.yml up --build -d
+services:
+  api:
+    environment:
+      SCAN_MODE: managed
+      ALLOW_MANAGED_SOURCE_ACCESS: ${ALLOW_MANAGED_SOURCE_ACCESS:?Explicit source access approval is required}
+      MANAGED_SCAN_CONSENT_ID: ${MANAGED_SCAN_CONSENT_ID:?A consent reference is required}
+  worker:
+    environment:
+      SCAN_MODE: managed
+      ALLOW_MANAGED_SOURCE_ACCESS: ${ALLOW_MANAGED_SOURCE_ACCESS:?Explicit source access approval is required}
+      MANAGED_SCAN_CONSENT_ID: ${MANAGED_SCAN_CONSENT_ID:?A consent reference is required}
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_app_key
+    volumes:
+      - ./private-key.pem:/run/secrets/github_app_key:ro

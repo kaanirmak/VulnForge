@@ -1,0 +1,40 @@
+name: VulnForge metadata scan
+description: Offline scan using an approved installed VulnForge runtime; no repository code execution or upload.
+inputs:
+  scanner-python:
+    description: Absolute Python path in the administrator-provisioned VulnForge environment, outside the checkout.
+    required: true
+  root:
+    description: Checkout to analyze.
+    default: ${{ github.workspace }}
+  repository:
+    description: Repository identity; not an upload authorization claim.
+    default: ${{ github.repository }}
+  commit-sha:
+    description: Exact checked-out commit; not an upload authorization claim.
+    default: ${{ github.sha }}
+  fail-on:
+    description: none, critical, high, medium or low.
+    default: none
+outputs:
+  code-report:
+    description: Local metadata report path; no source artifact is uploaded.
+    value: ${{ steps.scan.outputs.code-report }}
+  dependency-report:
+    description: Local metadata inventory report path.
+    value: ${{ steps.scan.outputs.dependency-report }}
+runs:
+  using: composite
+  steps:
+    - id: scan
+      shell: bash
+      env:
+        VF_PYTHON: ${{ inputs.scanner-python }}
+        VF_ROOT: ${{ inputs.root }}
+        VF_REPOSITORY: ${{ inputs.repository }}
+        VF_SHA: ${{ inputs.commit-sha }}
+        VF_FAIL_ON: ${{ inputs.fail-on }}
+        VF_ACTION: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        "$VF_PYTHON" -I "$VF_ACTION/scripts/action_scan.py"

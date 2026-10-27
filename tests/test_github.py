@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from vulnforge.github import GitHub, GitHubError
-from vulnforge.config import Config
+from support import managed_config as Config
 
 
 def test_content_fetch_and_tree_sha():

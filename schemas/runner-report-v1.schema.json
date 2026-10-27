@@ -1,0 +1,265 @@
+{
+  "$defs": {
+    "ReportCoverage": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "enum": [
+            "complete",
+            "incomplete"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "files_total": {
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Files Total",
+          "type": "integer"
+        },
+        "files_scanned": {
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Files Scanned",
+          "type": "integer"
+        },
+        "files_skipped": {
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Files Skipped",
+          "type": "integer"
+        },
+        "unresolved_dependencies": {
+          "default": 0,
+          "maximum": 1000000,
+          "minimum": 0,
+          "title": "Unresolved Dependencies",
+          "type": "integer"
+        },
+        "dependency_scope": {
+          "default": "unknown",
+          "enum": [
+            "resolved",
+            "declared",
+            "unknown"
+          ],
+          "title": "Dependency Scope",
+          "type": "string"
+        },
+        "reasons": {
+          "additionalProperties": {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxProperties": 7,
+          "propertyNames": {
+            "enum": [
+              "content_unavailable",
+              "unsupported_file_type",
+              "parse_error",
+              "scanner_limit",
+              "unresolved_dependency",
+              "transitive_graph_unavailable",
+              "no_supported_manifests"
+            ]
+          },
+          "title": "Reasons",
+          "type": "object"
+        }
+      },
+      "required": [
+        "state",
+        "files_total",
+        "files_scanned",
+        "files_skipped"
+      ],
+      "title": "ReportCoverage",
+      "type": "object"
+    },
+    "ReportDependency": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "maxLength": 214,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        },
+        "ecosystem": {
+          "enum": [
+            "PyPI",
+            "npm",
+            "Go",
+            "crates.io",
+            "Packagist"
+          ],
+          "title": "Ecosystem",
+          "type": "string"
+        },
+        "path_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Path Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "ecosystem",
+        "path_id"
+      ],
+      "title": "ReportDependency",
+      "type": "object"
+    },
+    "ReportFinding": {
+      "additionalProperties": false,
+      "properties": {
+        "rule_id": {
+          "enum": [
+            "hardcoded-secret",
+            "dynamic-execution",
+            "subprocess-shell",
+            "js-eval",
+            "inner-html"
+          ],
+          "title": "Rule Id",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "path_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Path Id",
+          "type": "string"
+        },
+        "line": {
+          "maximum": 10000000,
+          "minimum": 1,
+          "title": "Line",
+          "type": "integer"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule_id",
+        "severity",
+        "path_id",
+        "line",
+        "fingerprint"
+      ],
+      "title": "ReportFinding",
+      "type": "object"
+    },
+    "ReportManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "path_id": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Path Id",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path_id",
+        "sha256"
+      ],
+      "title": "ReportManifest",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "report_version": {
+      "const": "1",
+      "title": "Report Version",
+      "type": "string"
+    },
+    "scan_mode": {
+      "const": "customer_runner",
+      "title": "Scan Mode",
+      "type": "string"
+    },
+    "repo": {
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$",
+      "title": "Repo",
+      "type": "string"
+    },
+    "commit_sha": {
+      "pattern": "^[0-9a-f]{40}$",
+      "title": "Commit Sha",
+      "type": "string"
+    },
+    "scan_kind": {
+      "enum": [
+        "code",
+        "dependencies"
+      ],
+      "title": "Scan Kind",
+      "type": "string"
+    },
+    "coverage": {
+      "$ref": "#/$defs/ReportCoverage"
+    },
+    "manifests": {
+      "items": {
+        "$ref": "#/$defs/ReportManifest"
+      },
+      "maxItems": 80,
+      "title": "Manifests",
+      "type": "array"
+    },
+    "dependencies": {
+      "items": {
+        "$ref": "#/$defs/ReportDependency"
+      },
+      "maxItems": 1500,
+      "title": "Dependencies",
+      "type": "array"
+    },
+    "findings": {
+      "items": {
+        "$ref": "#/$defs/ReportFinding"
+      },
+      "maxItems": 5000,
+      "title": "Findings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "report_version",
+    "scan_mode",
+    "repo",
+    "commit_sha",
+    "scan_kind",
+    "coverage"
+  ],
+  "title": "RunnerReport",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}

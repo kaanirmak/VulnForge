@@ -1,0 +1,31 @@
+# Untrusted PRs require a disposable runner, never a persistent privileged runner.
+# This template is intentionally inactive until a disposable image/runtime is supplied.
+name: VulnForge pull request profile
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  scan:
+    # Provision a single-job ephemeral customer runner with no secrets or private network access.
+    runs-on: [self-hosted, linux, vulnforge-ephemeral-untrusted]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+          submodules: false
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 1
+      - id: scan
+        uses: OWNER/VulnForge@COMMIT_SHA
+        with:
+          scanner-python: /opt/vulnforge/bin/python
+          commit-sha: ${{ github.event.pull_request.head.sha }}
+          repository: ${{ github.repository }}
+      # No pull_request_target, secrets, privileged upload or source artifacts.
+      - if: always() && steps.scan.outputs.code-report != ''
+        env:
+          VF_REPORT: ${{ steps.scan.outputs.code-report }}
+        run: /opt/vulnforge/bin/python -I -m vulnforge.runner_cleanup --report "$VF_REPORT" --runner-temp "$RUNNER_TEMP"

@@ -1,113 +1,142 @@
-# VulnForge MVP — Commit Security + CVE Auto-Remediation
+# VulnForge 0.3.0 — GitHub security monitoring
 
-A **working GitHub App backend**, consisting of a FastAPI webhook receiver, a durable SQLite job queue, a separate background worker, basic static security rules, OSV vulnerability checks and opt-in draft security pull requests. **Not a production-grade SAST engine and not yet an LLM-powered agent.** It is the executable first milestone of the larger AI-security-agent design.
+FastAPI webhook intake, a durable SQLite/PostgreSQL queue, a separate worker, basic static rules, policy-gated OSV checks, snapshot evidence and an operator dashboard. The full target architecture in the technical design is **not implemented**. See the [Turkish requirements assessment](docs/REQUIREMENTS_COMPLIANCE_TR.md) and [tracked tasks](docs/TASKS_TR.md) for completed work and remaining gaps.
 
-## Scope today
+## Privacy defaults and readiness
 
-- Verify `X-Hub-Signature-256` using HMAC-SHA256 and deduplicate `X-GitHub-Delivery`.
-- Subscribe to `push`, `installation`, `installation_repositories`, `dependabot_alert`, `security_advisory`.
-- Cover each commit in a push via GitHub's paginated Compare API (GitHub webhook commit lists have limits); retry failed jobs.
-- Read changed Python/JS/TS source over the Contents API **without executing project code**. Detect possible tokens, `eval`/`exec`, `shell=True`, JS `eval` and `innerHTML` sinks with explicit rule IDs. These rules are intentionally incomplete and can raise false positives.
-- Inventory pinned dependencies in `requirements.txt`, `poetry.lock`, `package-lock.json`, `Cargo.lock`, `go.mod`, `composer.lock` and query OSV for existing known advisories. Match newly published global GitHub security advisories against the stored dependency inventory to trigger targeted rescans; also periodically recheck all registered repositories, even when no new commit is pushed.
-- Store per-repo findings, close resolved dependency findings after a successful full audit, display a minimal web dashboard, expose admin-authenticated JSON API.
-- When opted in, for **exact pinned Python requirements.txt dependencies only**, find a fixed OSV version, query that version again, update a new branch and create a **draft PR**. No auto-merge or CI status verification in this milestone.
+The default `SCAN_MODE=customer_runner` blocks server-side GitHub source access. `INTELLIGENCE_MODE=disabled` blocks outbound OSV queries. An offline customer CLI and composite Action are implemented and tested locally; immutable distribution and live Action acceptance remain pending. Production verified workflow ingestion and complete worker tenant isolation remain pending. GitHub login/session code exists but live provider acceptance is pending: **the default installation does not yet provide end-to-end customer scanning**. Operator report uploads use a strict, versioned metadata schema and a separate token; they remain quarantined and cannot become trusted scans or inventory.
 
-## Prerequisites
+Existing server-side scanning requires explicit managed-mode consent. Public OSV additionally requires metadata-sharing consent and an exact package allowlist; private package denials override it. See the [privacy architecture](docs/PRIVACY_ARCHITECTURE_TR.md), [retention targets](docs/DATA_RETENTION_TR.md), [technical privacy notice](docs/PRIVACY_NOTICE_DRAFT_TR.md) and [license assessment](docs/LICENSE_REVIEW_TR.md). These controls do not make this prototype ready for a multi-customer service.
 
-Python 3.11+ and a GitHub App installed in repositories you own or are authorized to protect.
+A separate organization API now applies per-role access and SQL organization scope for repositories, findings, scans, impacts/recommendations and exports. `CUSTOMER_API_PREVIEW=false` by default; enabling this preview requires explicitly configured loopback development auth and is rejected for public hostnames. PostgreSQL additionally uses FORCE RLS and separate non-owner runtime connections. Production worker isolation and live acceptance remain pending. See the [access guide](docs/ORGANIZATION_ACCESS_TR.md) and [database isolation runbook](docs/DATABASE_ISOLATION_TR.md).
 
-## Local development
+## Current capabilities
+
+- HMAC-SHA256 webhook verification, streaming payload limit and atomic delivery/job deduplication. Failed enqueue rolls back acceptance so redelivery can retry.
+- Push commit enumeration through Compare; initial pushes enumerate history from the immutable SHA. Enumeration is bounded at 2,000 commits and fails visibly when incomplete.
+- Pull request events scan the complete paginated PR file list, check HEAD before/after collection and run a separate dependency audit at the PR SHA. PR results do not replace default-branch dependency inventory.
+- Basic Python AST / JS regex rules and masked credential-pattern evidence. Repository code is never executed.
+- Six dependency manifests: requirements.txt, poetry.lock, package-lock.json, Cargo.lock, go.mod, composer.lock. OSV package/version queries, continuation pages and refreshed advisory details; optional CISA KEV enrichment.
+- Persistent scans with immutable SHA, manifest SHA-256, dependencies, findings, coverage issues and complete/incomplete/failed states. An incomplete scan cannot close old dependency findings.
+- CycloneDX 1.6 SBOM and SARIF 2.1.0 JSON exports tied to a scan. Incomplete inventory remains explicitly incomplete in exports.
+- Optional GitHub Checks and batched line annotations. Incomplete analysis reports `action_required`; complete scans with high/critical findings report `failure`.
+- Admin triage with reason, expiring single-finding suppression and observation/triage/expiry audit events. Active suppression survives rescans.
+- Dashboard with coverage, export downloads and total counters independent of list limits. Admin token stays in memory.
+
+## New vulnerabilities and project update recommendations
+
+With managed scanning and an intelligence policy enabled, signed advisory events and scheduled OSV audits persist advisory-to-project impacts and upgrade suggestions for human review. The dashboard's **Yeni açıklar ve etkilenen projeler** section filters by repository and CVE/GHSA/OSV identifier, shows package/current/target versions and provides a manual refresh action. The worker schedules checks every 15 minutes (`SCAN_INTERVAL_SECONDS=900`); source or metadata policy failures remain visible failures rather than clean scans. This scheduled path cannot yet consume trusted customer-runner inventory.
+
+Targets are checked against all current OSV advisories and supported new GitHub vulnerability ranges before being recommended. A candidate project is not automatically affected; missing data stays under investigation. No fix, unsupported versions, failed verification and withdrawn advisories have explicit states. Publication/compatibility/tests remain unverified, and suggestions do not apply updates. See the [Turkish feature guide](docs/THREAT_INTELLIGENCE_TR.md).
+
+New authenticated endpoints: `GET /api/v1/advisories`, `GET /api/v1/impacts` (repository/advisory/state filters and cursor pagination), and `POST /api/v1/intelligence/refresh` (optional repository).
+
+## Remediation safety change
+
+`ENABLE_AUTO_PR` defaults to false. Repository-specific opt-in now requires organization-admin approval and exact package/file allowlists, bound to the current connection. **Worker PR publication remains closed even with opt-in** until isolated resolver/build/test and SHA+diff-bound human approval exist. Bound worker tokens request contents/pull_requests read only; merge and non-draft write operations are rejected. There is no auto-merge. See the [policy and account guide](docs/ACCOUNT_OPERATIONS_TR.md).
+
+## Run locally
+
+Requires Python **3.11 or newer**. Default local inspection needs no GitHub private key. Managed scanning additionally needs an authorized GitHub App installation.
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate               # Windows: .venv\\Scripts\\activate
-pip install -e '.[dev]'
+python3.11 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev,postgres]'
 cp .env.example .env
-# Generate two different random values for WEBHOOK_SECRET and ADMIN_TOKEN.
-# Set GITHUB_APP_ID and place downloaded GitHub App private key in ./private-key.pem.
-# Load .env into environment (see below) OR configure env variables in your shell.
+# Set independent random WEBHOOK_SECRET and ADMIN_TOKEN values.
 set -a; source .env; set +a
-pytest -q
-uvicorn vulnforge.api:app --reload --port 8000
-# A second terminal with the same environment:
+python -m pytest -q
+uvicorn vulnforge.api:app --host 127.0.0.1 --port 8000
+# Second terminal, same environment:
 python -m vulnforge.worker
 ```
 
-Windows PowerShell: set environment variables individually, or use Docker Compose with `.env`.
+Alternatively, configure `.env` and run `docker compose up --build -d`. Default Compose mounts no App key and enforces customer-runner mode. Its image includes the PostgreSQL driver; Docker image/build acceptance remains untested. The dashboard binds to localhost at port 8000. Put HTML/API behind an identity-aware HTTPS proxy before internet exposure; the webhook uses its own signature authentication.
 
-### Docker Compose
+SQLite and PostgreSQL now use checksummed versioned migrations. For PostgreSQL customer preview, provision separate migration/operator/customer accounts; set `DATABASE_AUTO_MIGRATE=false` in runtime and `CUSTOMER_DATABASE_URL` to the restricted connection. The customer API rejects a migration owner or superuser. Follow the [account setup](docs/DATABASE_ISOLATION_TR.md) before enabling even local PostgreSQL preview. `DATABASE_URL` selects PostgreSQL and takes precedence over `DATABASE_PATH`. Existing supported SQLite databases receive additive migrations without deleting records. Back up before upgrading; stop writers before transferring to an empty PostgreSQL database. Follow the [migration runbook](docs/DATABASE_MIGRATION_TR.md). A [user/org/membership/ownership persistence model](docs/IDENTITY_MODEL_TR.md) is present; it supports the new account session, but does not yet authorize customer project data or isolate legacy APIs.
 
-```bash
-cp .env.example .env
-# Edit the two secrets, app ID, and store the private key as ./private-key.pem
-# Do not commit the secrets or the private key!
-docker compose up --build -d
+## GitHub account login
+
+The root redirects to `/account`; the global operator console is at `/operator`. Named `OPERATOR_CREDENTIALS` replace the legacy shared operator key and audit authenticated access without recording credentials or request values. Customer sessions remain separate. See the [operator guide](docs/ACCOUNT_OPERATIONS_TR.md).
+
+The `/account` page supports GitHub OAuth with browser-bound single-use state, S256 PKCE and opaque local sessions. It is disabled until `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET` and a fixed HTTPS `PUBLIC_ORIGIN` are configured together. Customer sessions do not grant operator API access. Local protocol and two-org data access tests pass; real App callback acceptance remains outstanding. Follow the [login guide](docs/GITHUB_LOGIN_TR.md); never share the client secret in chat or issues.
+
+## Managed scanning opt-in
+
+For a controlled operator deployment only, set:
+
+```dotenv
+SCAN_MODE=managed
+ALLOW_MANAGED_SOURCE_ACCESS=true
+MANAGED_SCAN_CONSENT_ID=owner-approval-2026-10-27
+GITHUB_APP_ID=<your-managed-app-id>
+GITHUB_PRIVATE_KEY_PATH=./private-key.pem
+INTELLIGENCE_MODE=public_osv
+ALLOW_EXTERNAL_PACKAGE_METADATA=true
+OSV_ALLOWED_PACKAGES=PyPI:requests,npm:lodash
+PRIVATE_PACKAGE_PATTERNS=PyPI:company-*,npm:@company/*
 ```
 
-The dashboard is at `http://127.0.0.1:8000/` (local only). A reverse proxy providing HTTPS, access controls and webhook reachability is needed to receive GitHub events on the public internet. **Never expose the admin dashboard unauthenticated.**
+Replace example packages with the exact approved inventory. An unapproved/private package blocks the whole query batch before transmission. The private HTTPS OSV client contract uses `private_osv`; queued private scans currently fail closed until private advisory namespaces are implemented. Network isolation must be provided separately. Keep `ENABLE_AUTO_PR=false`. With Compose, use `docker compose -f docker-compose.yml -f docker-compose.managed.yml up --build -d`; only the worker receives the key. See the [Turkish setup guide](BASLANGIC_TR.md).
 
-## GitHub App configuration
+## Managed GitHub App setup
 
-1. GitHub → Settings → Developer settings → GitHub Apps → New GitHub App.
-2. Webhook URL: `https://YOUR-DOMAIN/github/webhook`; webhook secret: the value of `WEBHOOK_SECRET`.
-3. Repository permissions: **Contents: Read**, **Metadata: Read**, **Dependabot alerts: Read** (where available). Subscribe to `push`, `installation`, `installation_repositories`, `dependabot_alert`, `security_advisory`. Install into selected repositories only.
-4. For draft PR creation set **Contents: Read & Write**, **Pull requests: Read & Write**. GitHub prompts to approve the extra privileges. Do not grant write permissions until you actually need them. Set `ENABLE_AUTO_PR=true` only then.
-5. Create a **private key** for the app and set `GITHUB_PRIVATE_KEY_PATH` to its local file path. Never send the key to a language model.
-6. Configure CI / branch protection in each protected repo; VulnForge never bypasses review and never merges on your behalf in this version.
+1. Set the webhook URL to `https://YOUR-DOMAIN/github/webhook` and use `WEBHOOK_SECRET`.
+2. Grant **Contents: read**, **Metadata: read**, **Pull requests: read**, and **Dependabot alerts: read** where available.
+3. Subscribe to `push`, `pull_request`, `installation`, `installation_repositories`, `dependabot_alert`, `security_advisory`.
+4. Optional: grant **Checks: write** and set `ENABLE_CHECKS=true`.
+5. Download the private key and set `GITHUB_PRIVATE_KEY_PATH`. Do not commit credentials.
+6. Set branch protection and required checks in the monitored repository. VulnForge does not configure protection or bypass review.
 
-Health check: `GET /health`. Dashboard: `GET /`. Dependency inventory: `GET /api/dependencies`. API calls need `Authorization: Bearer ADMIN_TOKEN`.
+This permission set belongs to the managed scanner. The customer-runner metadata identity preview rejects installations with permissions beyond Metadata read. Separate App registrations and the verified onboarding flow remain VF-021–029; changing an environment flag cannot remove permissions already granted to an existing GitHub App.
 
-```bash
-curl -H "Authorization: Bearer $ADMIN_TOKEN" http://127.0.0.1:8000/api/repositories
-curl -H "Authorization: Bearer $ADMIN_TOKEN" http://127.0.0.1:8000/api/findings
-curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" \
-  "http://127.0.0.1:8000/api/rescan?repo=ORG/REPO"
-```
+## API
 
-## Architecture
+`GET /health` and the dashboard shell at `/` are public. Existing data/mutation endpoints require `Authorization: Bearer ADMIN_TOKEN`. The operator-only report endpoint instead requires a distinct `OPERATOR_REPORT_TOKEN`; it is disabled while unset.
 
-```mermaid
-flowchart TD
-  A[GitHub App / Webhooks] --> B[FastAPI HMAC verification]
-  B --> C[(SQLite durable jobs)]
-  C --> D[Background Agent Worker]
-  D --> E[GitHub commits + file APIs]
-  E --> F[Static security rules]
-  D --> G[Lockfile inventory]
-  G --> H[OSV querybatch / advisory details]
-  H --> I[(Findings + statuses)]
-  F --> I
-  H --> J{Opt-in safe Python pin fix?}
-  J -- Yes --> K[Recheck patched version]
-  K --> L[Draft GitHub PR]
-  J -- No --> I
-  I --> M[Dashboard + Admin JSON API]
-  L --> M
-```
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/repositories`, `/api/jobs`, `/api/findings` | Existing repository/job/finding lists |
+| `GET /api/dependencies`, `/api/remediations` | Last complete default-branch inventory / prior PR records |
+| `POST /api/rescan?repo=ORG/REPO` | Queue default-branch dependency audit |
+| `GET /api/scans?repo=ORG/REPO` | Recent scans and coverage |
+| `GET /api/v1/scans/{id}` | Snapshot evidence and findings |
+| `GET /api/v1/scans/{id}/sarif` | SARIF export |
+| `GET /api/v1/sbom/{id}` | CycloneDX export for dependency scans |
+| `GET /api/v1/findings` | repo/status/severity filters, limit ≤100, integer cursor |
+| `PATCH /api/v1/findings/{id}/triage` | status, reason and suppression expiry |
+| `GET /api/v1/audit/events` | Recent finding history |
+| `GET /api/v1/overview` | Total counters |
+| `GET /api/v1/me` | Account identity only; separate session cookie, no operator data access |
+| `GET /api/v1/privacy` | Source/metadata policy and explicit customer/tenant readiness |
+| `POST /api/v1/operator/runner-reports` | Strict metadata reports, 1 MB maximum, quarantine only; separate operator token |
 
-## Developer notes and explicit constraints
+The filtered findings response is `{items, next_cursor}`; other legacy lists return bounded arrays. Triage accepts `status` (`open`, `resolved`, `suppressed`) and a reason of at least five characters. Suppression requires `expires_at` as Unix seconds within the next 366 days. Authentication still identifies one admin, not separate tenant users.
 
-- **Safety:** Project code isn't executed. Source isn't forwarded to an LLM. Read/skipped-file coverage is recorded for supported extensions. API hosts are configured by an operator, not read from webhook data. Read limits cap files and Git trees; oversized/incomplete audits **fail**, instead of pretending full coverage.
-- **Vulnerability sources:** Initial feed = OSV + GitHub `dependabot_alert`/global `security_advisory` triggers; standalone CISA KEV, NVD, full GHSA ingestion, exploitability analysis and reachability analysis are future milestones.
-- **No magic patching:** GitHub PR generation is for narrowly supported `requirements.txt` exact pins. npm lockfile regeneration, multi-file coordinated upgrades, writing tests, test-run sandboxing, AI patch ranking, and verifying CI are still TODOs.
-- **Reliability:** Queue is SQLite with retry and at-least-once semantics; use Postgres + Redis/Celery or another durable broker for many thousands of repositories. A process killed while processing may retry; deterministic job keys help prevent duplicates.
-- **Known limit:** GitHub's webhook events can be missed if deliveries exceed size limits or during long outages. Periodic dependency audits catch new CVEs, but complete commit-history reconciliation and webhook delivery backfill aren't built yet.
-- **Private repos:** Contents and dependency metadata remain in process and SQLite; store the SQLite volume encrypted as appropriate and restrict its filesystem permissions. Alerts may contain package names, filenames and snippets; sample static rules redact credential evidence.
-- **Severity:** `high`/`medium` labels are heuristic in this MVP, *not* verified CVSS/EPSS/KEV scores. No verified reachability claim.
-- **Admin:** The dashboard requires an admin token to access its JSON APIs. For internet-facing deployments additionally put `/` and `/api/*` behind a strong identity-aware proxy, implement rate limiting and audit logs.
+## Limits
 
-## Next milestones
+- This is a small static scanner, not Semgrep/CodeQL/Gitleaks or a full dataflow/reachability analyzer. Unsupported files and parsing limits are reported.
+- Pinned requirements do not prove transitive resolution; go.mod is a declaration, not the resolved build list. Local/git dependencies, unsupported manifests and parse/feed errors cannot produce a complete clean audit.
+- Stored default-branch inventory is the last **complete** audit. Consult scans and SBOM for current partial evidence. Advisory events conservatively recheck repositories with incomplete/failed inventory.
+- No isolated patch validator, npm lock regeneration, live-accepted OAuth/SSO, production worker/queue/cache isolation, GitLab, model integration, notifications, HA or delivery-backfill service. PostgreSQL persistence and identity tables alone do not provide those controls.
+- Severity is heuristic. CVSS vectors are retained as evidence; EPSS and reachability remain unknown. KEV enrichment indicates catalog membership, not exploitation of the monitored application.
+- The latest local suite passed 301 tests, including real temporary PostgreSQL migration, rollback and concurrent queue/last-admin tests. GitHub/OSV calls remain mocked; live App/Checks acceptance, Docker builds, load tests and production security review remain required. Queue leases/retries provide at-least-once processing, not exactly-once external effects.
+- Protect metadata, database volumes and backups appropriately. JSON exports contain repository/package names. Retention targets are documented but TTL/backup deletion automation is pending. The dashboard does not persist tokens in browser storage.
 
-1. Add Semgrep/CodeQL SARIF imports, suppressions, scan coverage metadata and unit-tested rules.
-2. Add NVD / GHSA / CISA KEV change feeds and event-driven intelligence, with version, environment and exploitability reasoning.
-3. Add isolated ephemeral CI/test runners, PR checks, rollback strategy and strict auto-merge policy.
-4. Add an opt-in LLM agent with tool allowlists, model-data minimization, human approvals and prompt-injection defenses.
-5. Add Postgres, tenant isolation, GitHub Checks annotations, observability and security hardening before production.
+## Integration references
 
-## Sources
+- [GitHub webhook verification](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)
+- [GitHub Checks API](https://docs.github.com/en/rest/checks/runs)
+- [OSV query and pagination](https://google.github.io/osv.dev/post-v1-query/)
+- [CycloneDX 1.6 schema](https://cyclonedx.org/schema/bom-1.6.schema.json)
 
-- [GitHub verifying webhooks](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries)
-- [GitHub push webhook contract](https://docs.github.com/en/webhooks/webhook-events-and-payloads#push)
-- [GitHub compare commits API](https://docs.github.com/en/rest/commits/commits#compare-two-commits)
-- [GitHub App installation access tokens](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation)
-- [OSV querybatch API](https://google.github.io/osv.dev/post-v1-querybatch/)
+## Offline runner and verification
+
+Install the approved package outside the customer checkout; run `vulnforge-scan` or `python -I -m vulnforge.cli`. No repository code, resolver, subprocess or network request is executed by the scanner. Reports contain only the strict v1 metadata contract and coverage; they do not establish trusted workflow identity. [Runner instructions and Action profiles](docs/RUNNER_TR.md). Workflow templates require the reviewed Action repository/immutable ref and a provisioned runtime before activation.
+
+`python scripts/check.py --postgres` creates a new private Unix-socket PostgreSQL cluster, runs the tests and shuts down/removes that cluster even after test failure. PostgreSQL binaries and the postgres/dev dependencies are prerequisites. It never connects to a shared or production DB. CI uses this path so DB checks are required instead of silently skipped. [Queue lifecycle/dead letters](docs/QUEUE_OPERATIONS_TR.md), [new account operations](docs/ACCOUNT_OPERATIONS_TR.md).
+
+## Identity-verified runner preview
+
+An additional loopback-only preview now verifies GitHub Actions RS256 identity, immutable repository/owner IDs, SHA, protected default branch and a platform-approved commit-pinned reusable workflow. Metadata-only App checks verify the current installation/repository without reading source. Upload receipts have transactional replay/conflict protection and remain `identity_verified_quarantined`; they do not update inventory, findings or scans. The default remains closed. `runner_upload` requires explicit metadata consent and uses short-lived Actions identity, never a shared upload secret. [Protocol, activation prerequisites and remaining live acceptance](docs/RUNNER_IDENTITY_TR.md).

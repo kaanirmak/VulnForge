@@ -3,6 +3,7 @@ import json
 import re
 import tomllib
 from dataclasses import dataclass
+from packaging.version import Version, InvalidVersion
 
 
 @dataclass(frozen=True)
@@ -30,7 +31,7 @@ def parse_manifest(path: str, content: str) -> list[Dependency]:
         obj = json.loads(content)
         # lockfile v2/v3: packages contains transitive resolved versions.
         for key, entry in obj.get('packages',{}).items():
-            if not key or not key.startswith('node_modules/') or not isinstance(entry,dict):
+            if not key or 'node_modules/' not in key or not isinstance(entry,dict):
                 continue
             pkg = key.split('node_modules/')[-1]
             if entry.get('version') and not entry.get('link'):
@@ -67,3 +68,78 @@ def parse_manifest(path: str, content: str) -> list[Dependency]:
             m=re.match(r'^([^\s()]+)\s+(v[^\s]+)$',line)
             if m: add(m[1],m[2],'Go')
     return list(dict.fromkeys(packages))
+
+
+@dataclass
+class InventoryResult:
+    dependencies: list[Dependency]
+    issues: list[dict]
+
+
+def inventory_manifest(path: str, content: str) -> InventoryResult:
+    """Extract known versions while retaining every unsupported declaration as coverage debt."""
+    issues = []
+    name = path.rsplit('/', 1)[-1]
+    deps = parse_manifest(path, content)
+    valid=[]
+    for dep in deps:
+        exact=True
+        if dep.ecosystem=='PyPI':
+            try: Version(dep.version)
+            except InvalidVersion: exact=False
+        elif dep.ecosystem in ('npm','crates.io','Packagist'):
+            exact=bool(re.fullmatch(r'\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?',dep.version))
+        if exact: valid.append(dep)
+        else: issues.append({'path':path,'reason':'non_exact_package_version'})
+    deps=valid
+    if name == 'requirements.txt':
+        for n, raw in enumerate(content.splitlines(), 1):
+            line = raw.strip()
+            if not line or line.startswith('#'):
+                continue
+            if not parse_manifest(path, line):
+                issues.append({'path': path, 'line': n, 'reason': 'unresolved_requirement'})
+        # Exact requirement pins do not establish the transitive dependency graph.
+        issues.append({'path': path, 'reason': 'transitive_graph_unavailable'})
+    elif name == 'go.mod':
+        issues.append({'path': path, 'reason': 'declared_modules_only_no_resolved_build_list'})
+    elif name == 'package-lock.json':
+        obj = json.loads(content)
+        if not isinstance(obj, dict) or not any(k in obj for k in ('packages', 'dependencies')):
+            issues.append({'path': path, 'reason': 'missing_lockfile_inventory'})
+        for key, item in obj.get('packages', {}).items():
+            if key and (not isinstance(item, dict) or not item.get('version') or item.get('link')):
+                issues.append({'path': path, 'reason': 'unresolved_or_local_package'})
+            if key and 'node_modules/' not in key:
+                issues.append({'path':path,'reason':'workspace_package_not_registry_resolved'})
+        if not obj.get('packages'):
+            def check_tree(tree):
+                for item in tree.values():
+                    if not isinstance(item,dict) or not item.get('version'):
+                        issues.append({'path':path,'reason':'unresolved_or_local_package'})
+                    elif item.get('dependencies'):
+                        check_tree(item['dependencies'])
+            check_tree(obj.get('dependencies',{}))
+        if obj.get('lockfileVersion') not in (1, 2, 3):
+            issues.append({'path': path, 'reason': 'unsupported_lockfile_version'})
+    elif name in ('poetry.lock', 'Cargo.lock'):
+        obj = tomllib.loads(content)
+        if 'package' not in obj:
+            issues.append({'path': path, 'reason': 'missing_package_inventory'})
+        for item in obj.get('package', []):
+            if not item.get('name') or not item.get('version'):
+                issues.append({'path': path, 'reason': 'missing_package_identity'})
+            if name == 'Cargo.lock' and not item.get('source', '').startswith('registry+'):
+                issues.append({'path': path, 'reason': 'unresolved_local_or_git_package'})
+            if name == 'poetry.lock' and item.get('source',{}).get('type') in ('git','directory','file','url'):
+                issues.append({'path':path,'reason':'unresolved_local_or_git_package'})
+    elif name == 'composer.lock':
+        obj = json.loads(content)
+        if 'packages' not in obj:
+            issues.append({'path': path, 'reason': 'missing_package_inventory'})
+        for item in obj.get('packages', []) + obj.get('packages-dev', []):
+            if not item.get('name') or not item.get('version'):
+                issues.append({'path': path, 'reason': 'missing_package_identity'})
+    else:
+        issues.append({'path': path, 'reason': 'unsupported_manifest'})
+    return InventoryResult(deps, issues)

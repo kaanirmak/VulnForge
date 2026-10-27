@@ -2,11 +2,11 @@ import asyncio
 import json
 import httpx
 
-from vulnforge.config import Config
+from support import managed_config as Config
 from vulnforge.db import Store
 from vulnforge.dependencies import Dependency
 from vulnforge.github import GitHub
-from vulnforge.osv import OSV
+from support import fixture_osv as OSV
 from vulnforge.worker import Agent
 
 
@@ -59,7 +59,7 @@ class FakeOSV:
         return []
 
 
-def test_agent_audits_and_creates_draft_pr(tmp_path):
+def test_agent_blocks_draft_pr_for_incomplete_inventory(tmp_path):
     async def run():
         store=Store(str(tmp_path/'db.sqlite'))
         store.upsert_repo('o/r',123,'main')
@@ -68,18 +68,21 @@ def test_agent_audits_and_creates_draft_pr(tmp_path):
         agent=Agent(cfg,store,gh,FakeOSV())
         await agent.audit('o/r',123,'main')
         assert len(store.list_rows('findings'))==1
-        assert len(gh.prs)==1
-        assert gh.prs[0][2]=='requests==2.31.0\n'
-        assert 'CI/tests have not been verified' in gh.prs[0][4]
-        assert len(store.list_rows('remediations'))==1
+        assert len(gh.prs)==0
+        scan=store.scan(store.list_rows('scans')[0]['id'])
+        assert scan['state']=='incomplete'
+        assert scan['dependencies'][0]['version']=='2.27.0'
+        assert 'transitive_graph_unavailable' in str(scan['coverage'])
+        assert any(e['action']=='remediation_blocked' for e in store.list_rows('audit_events'))
         await agent.audit('o/r',123,'main')
-        assert len(gh.prs)==1  # deduplicate patch PR
+        assert len(gh.prs)==0
     asyncio.run(run())
 
 
 def test_push_enqueues_every_commit(tmp_path):
     async def run():
         store=Store(str(tmp_path/'db.sqlite'))
+        store.upsert_repo('o/r',123,'main')
         agent=Agent(Config(),store,FakeGitHub(),FakeOSV())
         await agent.push('o/r',123,'main',{
             'before':'a'*40,'after':'b'*40,'commits':[],'ref':'refs/heads/main'})

@@ -1,5 +1,7 @@
 # VulnForge — Teknik tasarım
 
+> **0.3.0 güncellemesi:** Bu dosya önceki MVP anlatımını içerir. Güncel davranışlar ve gereksinim durumları için [uygunluk raporunu](REQUIREMENTS_COMPLIANCE_TR.md) okuyun. Worker PR yayını, repo opt-in olsa da izole doğrulama ve SHA/diff onay kapıları tamamlanana kadar kapalıdır. Yalnız `ENABLE_AUTO_PR=true` yeterli değildir.
+
 Bu belge, 23 Ekim 2026 tarihli SentinelAI tasarımının metin aktarımıdır. SentinelAI projesinin güncel adı VulnForge’dur. Belge hedef mimariyi anlatır; v0.2.0 uygulama kapsamı ve sınırları için README.md esas alınmalıdır. Kaynak bağlantılarına ilişkin doğrulama tarihleri özgün belgeye aittir.
 
 TEKNİK ÜRÜN TASARIMI  /  SÜRÜM 1.0

@@ -5,11 +5,12 @@ services:
     env_file: .env
     environment:
       DATABASE_PATH: /data/vulnforge.db
-      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_app_key
+      SCAN_MODE: customer_runner
+      ALLOW_MANAGED_SOURCE_ACCESS: "false"
+      GITHUB_PRIVATE_KEY_PATH: ""
     ports: ["127.0.0.1:8000:8000"]
     volumes:
       - vulnforge_data:/data
-      - ./private-key.pem:/run/secrets/github_app_key:ro
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
   worker:
@@ -19,10 +20,11 @@ services:
     env_file: .env
     environment:
       DATABASE_PATH: /data/vulnforge.db
-      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_app_key
+      SCAN_MODE: customer_runner
+      ALLOW_MANAGED_SOURCE_ACCESS: "false"
+      GITHUB_PRIVATE_KEY_PATH: ""
     volumes:
       - vulnforge_data:/data
-      - ./private-key.pem:/run/secrets/github_app_key:ro
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
 volumes:

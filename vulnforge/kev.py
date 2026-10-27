@@ -1,7 +1,7 @@
-"""CISA KEV catalog reader for *prioritizing* confirmed OSV dependency matches.
+"""CISA KEV catalog reader for prioritizing version-confirmed dependency matches.
 
 CISA KEV is CVE-centric, not a package-version matching service. It MUST NOT
-be used alone to claim a dependency is affected. Only enrich OSV results.
+be used alone to claim a dependency is affected. Only enrich verified results.
 """
 import re
 import time
@@ -23,6 +23,9 @@ class KEV:
         self._expires_at = 0.0
 
     async def close(self):
+        self._entries=None
+        self._expires_at=0.0
+        self.client.cookies.clear()
         if self.owns_client:
             await self.client.aclose()
 
@@ -57,7 +60,7 @@ class KEV:
 
     @staticmethod
     def match(advisory: dict, entries: dict[str, dict]) -> dict | None:
-        """Enrich only an already-confirmed OSV match, never infer vulnerable versions."""
+        """Enrich only an already-confirmed match, never infer vulnerable versions."""
         ids = [advisory.get('id'), *(advisory.get('aliases') or [])]
         for id_ in ids:
             if isinstance(id_, str) and CVE_RE.fullmatch(id_) and id_ in entries:

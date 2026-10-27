@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="tr">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VulnForge / Security Console</title>
+<title>VulnForge / Operatör Konsolu</title>
 <style>
 :root{color-scheme:dark;font-family:Inter,system-ui,-apple-system,sans-serif;background:#0a101c;color:#dfe9f8}
 *{box-sizing:border-box}body{margin:0;line-height:1.5}.shell{max-width:1180px;padding:48px 24px;margin:auto}
@@ -17,26 +17,88 @@ th{color:#9db4ce;text-transform:uppercase;font-size:11px;letter-spacing:1px}td{m
 a{color:#79d7d2}#message{min-height:22px;color:#e6ba8f;margin-bottom:14px}@media(max-width:650px){.stats{grid-template-columns:1fr}input{width:100%}}
 </style></head>
 <body><div class="shell">
-<header><div><div class="brand">⬡ Vuln<em>Forge</em></div><div class="sub">Autonomous Security Monitor · MVP 0.2.0</div></div>
-<div><input id="token" type="password" placeholder="Admin token (not saved)" autocomplete="off"> <button onclick="load()">Refresh</button></div></header>
-<div id="message">Admin token girip Refresh'e bas.</div>
+<header><div><div class="brand">⬡ Vuln<em>Forge</em></div><div class="sub">Operatör konsolu · 0.3.0 · Tüm projelere ayrı yetki gerektirir</div></div>
+<div><input id="token" type="password" placeholder="Operatör anahtarı (kaydedilmez)" autocomplete="off"> <button onclick="load()">Refresh</button></div></header>
+<div id="message">Operatör anahtarını girip Refresh’e bas. Müşteri girişi için GitHub hesap ekranını kullan.</div>
+<p class="sub"><a href="/account">GitHub hesap girişi</a> · Müşteri proje bağlantısı henüz hazır değil.</p>
+<p id="privacy_status" class="sub" role="status">Tarama modu ve veri paylaşımı durumu girişten sonra gösterilir.</p>
 <div class="stats"><div class="stat"><div class="sub">Repositories</div><div id="repos_n" class="num">—</div></div><div class="stat"><div class="sub">Open Findings</div><div id="finds_n" class="num">—</div></div><div class="stat"><div class="sub">Draft Remediations</div><div id="prs_n" class="num">—</div></div></div>
+<div class="section"><h2>Yeni açıklar ve etkilenen projeler</h2>
+<p class="sub">Yeni duyurular ve düzenli bağımlılık kontrolleri burada eşleştirilir. İnceleniyor durumu güvenli sonuç değildir. Önerilen sürümler OSV'de kontrol edilir; yayımlanmış sürüm, uyumluluk ve testler ayrıca doğrulanmalıdır.</p>
+<div><input id="impact_repo" placeholder="Proje: org/repo" aria-label="Proje filtresi"> <input id="impact_advisory" placeholder="CVE / GHSA / OSV kimliği" aria-label="Açık filtresi"> <button onclick="loadImpacts()">Filtrele</button> <button onclick="refreshIntelligence()">Açıkları şimdi kontrol et</button></div>
+<h3>Son güvenlik duyuruları</h3><div id="advisories"></div>
+<h3>Proje etkisi ve güncelleme önerileri</h3><div id="impacts"></div><button id="more_impacts" hidden onclick="loadImpacts(true)">Daha fazla göster</button>
+<p id="intelligence_status" class="sub" role="status"></p></div>
+<div class="section"><h2>Tarama kapsamı ve kanıtlar</h2><p class="sub">Eksik tarama güvenli sonuç değildir. SBOM yalnızca gözlemlenen bileşenleri içerir; kod erişilebilirliği bilinmiyor.</p><div id="scans"></div><div id="exports"></div></div>
 <div class="section"><h2>Security Findings</h2><div id="findings"></div></div>
 <div class="section"><h2>Recent Jobs</h2><div id="jobs"></div></div>
 <div class="section"><h2>Repositories</h2><div id="repos"></div></div>
 <div class="sub" style="margin-top:36px">No repository source code is executed by this MVP. Auto-merge disabled.</div>
 </div><script>
 let token='';
+let impactItems=[],impactCursor=null;
 function safe(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function table(el,heads,rows){let html='<table><thead><tr>'+heads.map(h=>'<th>'+safe(h)+'</th>').join('')+'</tr></thead><tbody>';
 html+=rows.length?rows.map(r=>'<tr>'+r.map(c=>'<td>'+safe(c)+'</td>').join('')+'</tr>').join(''):'<tr><td colspan="'+heads.length+'">No data yet</td></tr>';
 document.getElementById(el).innerHTML=html+'</tbody></table>';}
 async function get(path){let r=await fetch(path,{headers:{Authorization:'Bearer '+token}});if(!r.ok)throw Error('HTTP '+r.status+' '+path);return r.json();}
 async function load(){token=document.getElementById('token').value;document.getElementById('message').textContent='';try{
-let [repos,findings,jobs,prs]=await Promise.all(['/api/repositories','/api/findings','/api/jobs','/api/remediations'].map(get));
-document.getElementById('repos_n').textContent=repos.length;document.getElementById('finds_n').textContent=findings.filter(x=>x.status==='open').length;document.getElementById('prs_n').textContent=prs.length;
+let [repos,findings,jobs,prs,scans,overview,privacy]=await Promise.all(['/api/repositories','/api/findings','/api/jobs','/api/remediations','/api/scans','/api/v1/overview','/api/v1/privacy'].map(get));
+document.getElementById('privacy_status').textContent=(privacy.server_source_access?'Yönetilen tarama: kaynak erişimi açık. ':'Müşteri koşucusu modu: sunucunun kaynak erişimi kapalı. ')+(privacy.intelligence_mode==='disabled'?'Dış açık veritabanına paket paylaşımı kapalı. ':'Paket sorguları yapılandırılmış paylaşım politikasına bağlı. ')+(!privacy.customer_ingestion_ready?'Müşteri raporu kabulü henüz hazır değil; operatör raporları karantinada kalır. ':'')+(!privacy.tenant_isolation_ready?'Organizasyonlar arası veri yalıtımı henüz hazır değil.':'');
+document.getElementById('repos_n').textContent=overview.repositories;document.getElementById('finds_n').textContent=overview.open_findings;document.getElementById('prs_n').textContent=overview.remediations;
+document.getElementById('message').textContent=overview.incomplete_repositories ? overview.incomplete_repositories+' depoda eksik/başarısız bağımlılık taraması var. Bulgular ve listeler son kayıtlarla sınırlıdır.' : 'Listeler son kayıtları gösterir; sayaçlar toplamdır.';
+table('scans',['Repository','SHA','Tür','Durum','Taranan / Atlanan','Kapsama sorunları'],scans.slice(0,30).map(s=>{const c=JSON.parse(s.coverage);return [s.repo,(s.commit_sha||'unknown').slice(0,12),s.kind,s.state,(c.files_scanned||0)+' / '+(c.files_skipped||0),(c.issues||[]).map(i=>(i.path?i.path+': ':'')+i.reason).join('; ')];}));
+const exports=document.getElementById('exports');exports.replaceChildren();
+for(const scan of scans.slice(0,10)){
+ if(scan.state==='running')continue;
+ for(const format of ['SARIF',...(['dependencies','pr_dependencies'].includes(scan.kind)?['SBOM']:[])]){
+  const button=document.createElement('button');button.textContent=scan.repo+' '+scan.id.slice(0,8)+' '+format;
+  button.addEventListener('click',()=>downloadReport(scan.id,format).catch(e=>{document.getElementById('message').textContent=e.message;}));exports.append(button);
+ }
+}
+await loadImpacts();
 table('findings',['Repository','Severity','Title','Path','State'],findings.map(f=>[f.repo,f.severity.toUpperCase(),f.title,f.file_path,f.status]));
 table('jobs',['ID','Repository','Task','State','Attempts'],jobs.slice(0,30).map(j=>[j.id,j.repo,j.kind,j.state,j.attempts]));
 table('repos',['Repository','Default branch','Installation','Updated'],repos.map(r=>[r.full_name,r.default_branch,r.installation_id,new Date(r.updated_at*1000).toLocaleString()]));
 }catch(e){document.getElementById('message').textContent='Cannot load: '+e.message;}}
+const impactStates={affected:'Etkileniyor',not_affected:'Tam taramada saptanmadı',under_investigation:'İnceleniyor / bilgi eksik',withdrawn:'Duyuru geri çekildi'};
+const recommendationStates={no_known_fix:'Bilinen düzeltme sürümü yok',unsupported_version:'Sürüm için manuel inceleme gerekli',target_still_affected:'Aday sürümde de açık var',verification_failed:'Sürüm doğrulanamadı'};
+async function loadImpacts(more=false){
+ token=document.getElementById('token').value;
+ try{
+  if(!more){impactItems=[];impactCursor=null;}
+  const params=new URLSearchParams({limit:'50',cursor:String(more&&impactCursor?impactCursor:0)});
+  const repo=document.getElementById('impact_repo').value.trim(),advisory=document.getElementById('impact_advisory').value.trim();
+  if(repo)params.set('repo',repo);if(advisory)params.set('advisory_id',advisory);
+  const [data,advisories]=await Promise.all([get('/api/v1/impacts?'+params),get('/api/v1/advisories')]);
+  impactItems.push(...data.items);impactCursor=data.next_cursor;
+  table('advisories',['Açık','Özet','Etkilenen proje','İncelenen proje','Son gözlem'],advisories.map(a=>[a.id,a.summary,a.affected_projects,a.pending_projects,new Date(a.updated_at*1000).toLocaleString()]));
+  const rows=[];
+  for(const impact of impactItems){
+   const evidence=impact.evidence;
+   if(impact.recommendations.length){
+    for(const rec of impact.recommendations)rows.push([impact.advisory_id,impact.repo,impactStates[impact.state],rec.package+' ('+rec.ecosystem+')',rec.current_version,
+     rec.recommended_version||recommendationStates[rec.status]||rec.status,rec.upgrade_class||'İnceleme gerekli',rec.file_path+' · '+(evidence.commit_sha||'').slice(0,12)]);
+   }else rows.push([impact.advisory_id,impact.repo,impactStates[impact.state],'—','—','Güncel öneri yok','—',evidence.reason||'']);
+  }
+  table('impacts',['Açık','Proje','Etki','Paket','Mevcut sürüm','Öneri','Güncelleme türü','Kanıt'],rows);
+  document.getElementById('more_impacts').hidden=!impactCursor;
+  document.getElementById('intelligence_status').textContent=impactItems.length+' eşleşme gösteriliyor. Proje ve açık kimliğiyle filtreleyebilirsiniz.';
+ }catch(e){document.getElementById('intelligence_status').textContent='Yüklenemedi: '+e.message;}
+}
+async function refreshIntelligence(){
+ token=document.getElementById('token').value;
+ const repo=document.getElementById('impact_repo').value.trim();
+ try{
+  const response=await fetch('/api/v1/intelligence/refresh'+(repo?'?repo='+encodeURIComponent(repo):''),{method:'POST',headers:{Authorization:'Bearer '+token}});
+  if(!response.ok)throw Error('HTTP '+response.status);
+  const result=await response.json();
+  document.getElementById('intelligence_status').textContent=result.queued+' kontrol kuyruğa alındı. İşçi sonuçlandırdıktan sonra Refresh ile yenileyin.';
+ }catch(e){document.getElementById('intelligence_status').textContent='Kontrol başlatılamadı: '+e.message;}
+}
+async function downloadReport(id,format){
+ const data=await get(format==='SBOM'?'/api/v1/sbom/'+id:'/api/v1/scans/'+id+'/sarif');
+ const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+ const a=document.createElement('a');a.href=url;a.download='vulnforge-'+id+'-'+format.toLowerCase()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 </script></body></html>
