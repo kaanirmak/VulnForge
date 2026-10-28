@@ -27,6 +27,7 @@ def sbom(scan):
                                         {'name': 'vulnforge:commit', 'value': scan['commit_sha'] or 'unknown'},
                                         {'name': 'vulnforge:scan', 'value': scan['id']},
                                         {'name': 'vulnforge:coverage', 'value': scan['state']},
+                                        {'name': 'vulnforge:evidence_status', 'value': json.dumps(scan.get('evidence_status',{}),sort_keys=True)},
                                         {'name': 'vulnforge:evidence', 'value': json.dumps(scan['coverage'],sort_keys=True)}]},
             'components': list(components.values())}
 
@@ -47,5 +48,6 @@ def sarif(scan):
             'runs': [{'tool': {'driver': {'name': 'VulnForge', 'version': '0.3.0', 'rules': list(rules.values())}},
                       'invocations': [{'executionSuccessful': scan['state'] == 'complete'}],
                       'properties': {'scan_id': scan['id'], 'commit_sha': scan['commit_sha'],
+                                     'evidence_status':scan.get('evidence_status',{}),
                                      'coverage': scan['coverage'], 'analysis_state': scan['state']},
                       'results': results}]}

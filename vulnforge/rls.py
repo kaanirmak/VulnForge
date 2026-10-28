@@ -14,8 +14,8 @@ from .db import Store
 
 READ_TABLES=('organizations','memberships','repository_ownership','repositories','findings','dependency_inventory',
              'remediations','scans','scan_findings','advisory_impacts','advisories','advisory_aliases','suppressions','audit_events')
-RLS_TABLES=(*READ_TABLES,'users','jobs','deliveries','runner_reports','invitations','remediation_policies','runner_policies','runner_receipts','runner_token_uses')
-PRIVATE_TABLES=('users','jobs','deliveries','runner_reports','auth_states','user_sessions','schema_migrations','invitations','remediation_policies','runner_policies','runner_receipts','runner_token_uses')
+RLS_TABLES=(*READ_TABLES,'users','jobs','deliveries','runner_reports','invitations','remediation_policies','runner_policies','runner_receipts','runner_token_uses','connection_intents')
+PRIVATE_TABLES=('users','jobs','deliveries','runner_reports','auth_states','user_sessions','schema_migrations','invitations','remediation_policies','runner_policies','runner_receipts','runner_token_uses','connection_intents')
 SEQUENCES=('jobs_id_seq','findings_id_seq','remediations_id_seq','audit_events_id_seq','advisory_impacts_id_seq')
 INSERT_COLUMNS={'suppressions':{'finding_id','reason','expires_at'},
                 'audit_events':{'repo','finding_id','actor','action','details','created_at'}}

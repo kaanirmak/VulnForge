@@ -13,7 +13,7 @@ from .database import DatabaseError
 TABLES=('users','organizations','memberships','repositories','deliveries','jobs','findings','dependency_inventory','remediations',
         'scans','scan_findings','audit_events','suppressions','advisories','advisory_aliases',
         'advisory_impacts','runner_reports','repository_ownership','auth_states','user_sessions','invitations','remediation_policies',
-        'runner_policies','runner_receipts','runner_token_uses')
+        'runner_policies','runner_receipts','runner_token_uses','connection_intents')
 SERIAL_TABLES=('jobs','findings','remediations','audit_events','advisory_impacts')
 
 

@@ -3,6 +3,7 @@
 No provider access/refresh token is persisted. Customer sessions are never admin
 credentials and cannot authorize legacy APIs or runner report ingestion.
 """
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -35,16 +36,21 @@ class GitHubLogin:
     def __init__(self,cfg): self.cfg=cfg
 
     async def exchange_user(self,code,verifier):
+        return await self._authorize(code,verifier,'/auth/github/callback')
+
+    async def _authorize(self,code,verifier,callback_path,consumer=None):
         # Never enable redirects or use GITHUB_API_URL for identity verification.
         # A redirected bearer/client secret must not reach an arbitrary host.
         if not self.cfg.oauth_enabled: raise AuthError('GitHub sign-in is not configured')
+        if callback_path not in ('/auth/github/callback','/auth/github/connect/callback'):
+            raise AuthError('Invalid authorization purpose')
         try:
-            async with httpx.AsyncClient(timeout=10,follow_redirects=False) as client:
+            async with asyncio.timeout(45),httpx.AsyncClient(timeout=10,follow_redirects=False,trust_env=False) as client:
                 token_data=await self._json(client,'POST','https://github.com/login/oauth/access_token',
                     data={'client_id':self.cfg.github_oauth_client_id,
                           'client_secret':self.cfg.github_oauth_client_secret,
                           'code':code,'code_verifier':verifier,
-                          'redirect_uri':self.cfg.public_origin+'/auth/github/callback'},
+                          'redirect_uri':self.cfg.public_origin+callback_path},
                     headers={'Accept':'application/json'})
                 token=token_data.get('access_token')
                 if (not isinstance(token,str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,512}',token) or
@@ -58,8 +64,9 @@ class GitHubLogin:
                     not isinstance(user.get('login'),str) or
                     not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,38}',user['login'])):
                     raise AuthError('GitHub identity could not be verified')
-                return {'id':user['id'],'login':user['login']}
-        except (httpx.HTTPError,ValueError,KeyError,TypeError,AttributeError,RecursionError):
+                identity={'id':user['id'],'login':user['login']}
+                return await consumer(client,token,identity) if consumer else identity
+        except (httpx.HTTPError,ValueError,KeyError,TypeError,AttributeError,RecursionError,TimeoutError):
             # Do not expose or log provider response bodies, codes or credentials.
             raise AuthError('GitHub identity could not be verified') from None
 
@@ -93,7 +100,9 @@ class AuthSessions:
     @property
     def secure(self): return self.cfg.public_origin.startswith('https://')
 
-    def begin(self):
+    def begin(self,callback_path='/auth/github/callback'):
+        if callback_path not in ('/auth/github/callback','/auth/github/connect/callback'):
+            raise AuthError('Invalid authorization purpose')
         state=secrets.token_urlsafe(32);verifier=secrets.token_urlsafe(48)
         challenge=base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
         now=time.time()
@@ -101,7 +110,7 @@ class AuthSessions:
             c.execute('DELETE FROM auth_states WHERE expires_at<=?',(now,))
             c.execute('INSERT INTO auth_states VALUES(?,?,?)',(digest(state),digest(verifier),now+FLOW_SECONDS))
         url='https://github.com/login/oauth/authorize?'+urlencode({
-            'client_id':self.cfg.github_oauth_client_id,'redirect_uri':self.cfg.public_origin+'/auth/github/callback',
+            'client_id':self.cfg.github_oauth_client_id,'redirect_uri':self.cfg.public_origin+callback_path,
             'state':state,'code_challenge':challenge,'code_challenge_method':'S256'})
         return url,verifier
 

@@ -198,7 +198,8 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
             queued=0
             for repo in matching:
                 if advisory_id: store.pending_impact(repo,advisory_id,delivery)
-                queued+=store.enqueue('dependency_audit',repo,{'advisory_id':advisory_id},f'advisory:{delivery}:{repo}')
+                if cfg.source_access_allowed:
+                    queued+=store.enqueue('dependency_audit',repo,{'advisory_id':advisory_id},f'advisory:{delivery}:{repo}')
             return {'accepted':True,'queued':queued,'matching_repositories':len(matching)}
         installation=data.get('installation') or {}
         installation_id=installation.get('id')
@@ -229,8 +230,15 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
                 continue
             branch=item.get('default_branch') or 'main'
             store.upsert_repo(name,installation_id,branch)
-            if cfg.scan_mode=='customer_runner' and event in ('push','pull_request'):
-                # No source job or raw commit/diff payload is queued in this mode.
+            if event=='push' and data.get('ref')=='refs/heads/'+branch:
+                # Keep a monotonic local invalidation, even in customer-runner
+                # mode. An out-of-order delivery may require an extra scan but
+                # must never make an older snapshot look current again.
+                store.invalidate_repository_evidence(name)
+                store.audit_event(name,None,'github_webhook','default_branch_push_observed',{})
+            if cfg.scan_mode=='customer_runner':
+                # All current worker jobs need source access. Customer mode
+                # records integration metadata without generating source jobs.
                 continue
             if event=='pull_request' and action in ('opened','synchronize','reopened','ready_for_review'):
                 pr=data.get('pull_request') or {}
@@ -266,6 +274,8 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
 
     @app.post('/api/v1/intelligence/refresh',dependencies=[Depends(admin)],status_code=202)
     async def refresh_intelligence(repo: str | None=None):
+        if not cfg.source_access_allowed:
+            raise HTTPException(409,'Trusted customer inventory is not ready; source scanning stays disabled')
         with store.transaction(), store.conn() as c:
             rows=c.execute('SELECT full_name FROM repositories WHERE full_name=?',(repo,)).fetchall() if repo else c.execute('SELECT full_name FROM repositories').fetchall()
             if repo and not rows: raise HTTPException(404,'Repository not registered')
@@ -300,7 +310,10 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
         with store.conn() as c:
             rows=c.execute('SELECT * FROM findings WHERE '+' AND '.join(clauses)+' ORDER BY id LIMIT ?',args+[limit+1]).fetchall()
         items=[dict(r) for r in rows[:limit]]
-        for item in items: item['details']=json.loads(item['details'])
+        from .freshness import finding_view
+        with store.conn() as c:
+            cache={}
+            items=[finding_view(c,item,cache) for item in items]
         return {'items':items,'next_cursor':items[-1]['id'] if len(rows)>limit else None}
 
     @app.get('/api/v1/overview',dependencies=[Depends(admin)])

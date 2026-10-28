@@ -1,0 +1,4 @@
+# Generated from reviewed installed versions; wheel-only, CPython 3.11/3.12 POSIX.
+# Install with --require-hashes --only-binary=:all:. Refresh: scripts/lock_dependencies.py --refresh
+setuptools==79.0.1 \
+    --hash=sha256:e147c0549f27767ba362f9da434eab9c5dc0045d5304feb602a0af001089fc51

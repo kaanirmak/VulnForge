@@ -114,6 +114,15 @@ class OrganizationData:
                    'scans':'x.started_at DESC,x.id','dependency_inventory':'x.file_path,x.ecosystem,x.normalized_name,x.version'}[table]
             rows=c.execute(sql+' ORDER BY '+order+' LIMIT ?',args+[limit+1]).fetchall()
             items=self.decode(rows[:limit],TABLES[table][1])
+            from .freshness import repository_evidence,scan_evidence,finding_view
+            cache={}
+            for index,item in enumerate(items):
+                if table in ('repositories','dependency_inventory'):
+                    name=item['full_name'] if table=='repositories' else item['repo']
+                    if name not in cache: cache[name]=repository_evidence(c,name)
+                    item['evidence_status']=cache[name]
+                elif table=='scans': item['evidence_status']=scan_evidence(c,item,cache)
+                elif table=='findings': items[index]=finding_view(c,item,cache)
             # Non-numeric lists are explicitly bounded, never advertised as full.
             return {'items':items,'truncated':len(rows)>limit,
                     'next_cursor':items[-1]['id'] if len(rows)>limit and table in ('findings','remediations') else None}
@@ -126,6 +135,9 @@ class OrganizationData:
             scan=self.decode([row],('coverage','dependencies'))[0]
             scan['findings']=[json.loads(row['data']) for row in c.execute(
                 'SELECT data FROM scan_findings WHERE scan_id=? ORDER BY finding_key',(scan_id,))]
+            from .freshness import scan_evidence,finding_view
+            scan['evidence_status']=scan_evidence(c,scan)
+            scan['findings']=[finding_view(c,{**finding,'repo':scan['repo']}) for finding in scan['findings']]
             if export:
                 self.store.audit_event(scan['repo'],None,self.user_id,'scan_export_requested',
                     {'organization_id':self.organization_id,'scan_id':scan_id})
@@ -143,7 +155,11 @@ class OrganizationData:
                 args.append(advisory_id)
             rows=c.execute(sql+' ORDER BY x.id LIMIT ?',args+[limit+1]).fetchall()
             items=self.decode(rows[:limit],('evidence','recommendations'))
-            return {'items':items,'next_cursor':items[-1]['id'] if len(rows)>limit else None}
+            from .freshness import impact_view
+            cache={}
+            items=[impact_view(c,item,cache) for item in items]
+            return {'items':items,'next_cursor':items[-1]['id'] if len(rows)>limit else None,
+                    'filter_scope':'observed_state'}
 
     def advisories(self,limit=50):
         with self.access('impact.read') as c:

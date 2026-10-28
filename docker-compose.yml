@@ -13,19 +13,5 @@ services:
       - vulnforge_data:/data
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
-  worker:
-    build: .
-    restart: unless-stopped
-    command: ["python", "-m", "vulnforge.worker"]
-    env_file: .env
-    environment:
-      DATABASE_PATH: /data/vulnforge.db
-      SCAN_MODE: customer_runner
-      ALLOW_MANAGED_SOURCE_ACCESS: "false"
-      GITHUB_PRIVATE_KEY_PATH: ""
-    volumes:
-      - vulnforge_data:/data
-    security_opt: ["no-new-privileges:true"]
-    cap_drop: ["ALL"]
 volumes:
   vulnforge_data:

@@ -68,7 +68,7 @@ def test_organization_and_user_role_guc_forgery_does_not_change_actor(scoped):
         assert not c.execute("SELECT vf_security.permits('finding.suppress')").fetchone()[0]
 
 
-@pytest.mark.parametrize('table',['user_sessions','auth_states','jobs','deliveries','runner_reports','schema_migrations','invitations','remediation_policies','runner_policies','runner_receipts','runner_token_uses'])
+@pytest.mark.parametrize('table',['user_sessions','auth_states','jobs','deliveries','runner_reports','schema_migrations','invitations','remediation_policies','runner_policies','runner_receipts','runner_token_uses','connection_intents'])
 def test_customer_role_cannot_read_privileged_tables_even_with_session(scoped,table):
     _,customer,_,_,scope=scoped
     with pytest.raises(DatabaseError,match='42501'):

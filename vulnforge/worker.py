@@ -177,6 +177,9 @@ class Agent:
         if len(deps)>1500:
             raise RuntimeError('Dependency inventory exceeds 1500 packages; split audit required')
         affected=await self.osv.check(deps)
+        coverage['intelligence_checked_at']=time.time()
+        coverage['intelligence_source']=self.cfg.intelligence_mode
+        coverage['default_branch']=default_branch
         source_negatives=set()
         if not snapshot_sha:
             previous_ids=self.store.impact_advisory_ids(repo)
@@ -272,6 +275,8 @@ class Agent:
 
 async def run_worker():
     cfg=Config.from_env()
+    if not cfg.source_access_allowed:
+        raise SystemExit('Source worker is disabled in customer-runner mode; no source jobs are scheduled')
     logging.basicConfig(level=logging.INFO,format='%(asctime)s %(levelname)s %(message)s')
     if cfg.source_access_allowed and (not cfg.app_id or not cfg.private_key_path):
         raise SystemExit('Configure GITHUB_APP_ID and GITHUB_PRIVATE_KEY_PATH before starting worker')

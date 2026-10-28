@@ -15,6 +15,11 @@ from test_webhook import setup, signed
 
 AUTH={'Authorization':'Bearer test-admin'}
 
+def intelligence_config(**kwargs):
+    return Config(intelligence_mode='public_osv',allow_external_package_metadata=True,
+                  osv_allowed_packages=('npm:demo','PyPI:requests'),**kwargs)
+
+
 
 def advisory(eco='PyPI',name='demo',target='1.0.1',id_='GHSA-FIXTURE'):
     return {'id':id_,'aliases':['CVE-2099-12345'],'summary':'Fictional test advisory',
@@ -91,12 +96,14 @@ def test_periodic_audit_persists_project_impact_and_suggestion_without_auto_pr(t
         store=Store(str(tmp_path/'db'))
         store.upsert_repo('o/r',1,'main')
         gh=FakeGitHub()
-        await Agent(Config(enable_auto_pr=False),store,gh,FakeOSV()).audit('o/r',1,'main')
+        await Agent(intelligence_config(enable_auto_pr=False),store,gh,FakeOSV()).audit('o/r',1,'main')
         impact=store.list_impacts()['items'][0]
         assert impact['repo']=='o/r' and impact['state']=='affected'
         assert impact['evidence']['dependencies'][0]['version']=='2.27.0'
         assert not impact['evidence']['coverage_complete']
-        assert impact['recommendations'][0]['recommended_version']=='2.31.0'
+        assert impact['recommendations'][0]['recommended_version'] is None
+        assert impact['recommendations'][0]['previous_recommended_version']=='2.31.0'
+        assert impact['recommendations'][0]['status']=='needs_reverification'
         assert gh.prs==[]
         assert store.list_advisories()[0]['affected_projects']==1
         assert store.list_impacts(advisory_id='GHSA-TEST')['items'][0]['id']==impact['id']
@@ -112,7 +119,8 @@ def test_impacts_follow_upgrade_and_failed_audit_does_not_look_safe(tmp_path):
             return [(d,advisory('npm')) for d in deps if self.affected and d.version=='1.0.0']
     async def run():
         store=Store(str(tmp_path/'db'));osv=MutableOSV()
-        agent=Agent(Config(),store,LockGitHub(),osv)
+        store.upsert_repo('o/r',1,'main')
+        agent=Agent(intelligence_config(),store,LockGitHub(),osv)
         await agent.audit('o/r',1,'main')
         assert store.list_impacts()['items'][0]['state']=='affected'
         osv.fail=True
@@ -145,7 +153,7 @@ def test_new_advisory_is_matched_before_osv_index_update_and_rechecked(tmp_path)
     pending=client.get('/api/v1/impacts',headers=AUTH).json()['items'][0]
     assert pending['state']=='under_investigation'
     async def run():
-        agent=Agent(Config(),store,LockGitHub(),CleanOSV())
+        agent=Agent(intelligence_config(),store,LockGitHub(),CleanOSV())
         await agent.process(store.claim())
         await agent.audit('o/affected',1,'main')  # OSV still hasn't indexed the new event.
     asyncio.run(run())
@@ -161,9 +169,9 @@ def test_ghsa_fix_still_inside_new_range_is_rejected_even_if_osv_has_no_record(t
     store.upsert_repo('o/r',1,'main')
     body=ghsa_body(target='1.0.1',range_='>= 1.0.0, < 1.0.2')
     client.post('/github/webhook',content=body,headers=signed('security_advisory',body))
-    asyncio.run(Agent(Config(),store,LockGitHub(),CleanOSV()).process(store.claim()))
+    asyncio.run(Agent(intelligence_config(),store,LockGitHub(),CleanOSV()).process(store.claim()))
     result=store.list_impacts()['items'][0]['recommendations'][0]
-    assert result['recommended_version'] is None and result['status']=='target_still_affected'
+    assert result['recommended_version'] is None and result['previous_status']=='target_still_affected'
 
 
 def test_unknown_range_is_never_declared_not_affected(tmp_path):
@@ -171,7 +179,7 @@ def test_unknown_range_is_never_declared_not_affected(tmp_path):
     store.upsert_repo('o/r',1,'main')
     body=ghsa_body(range_='^1.0.0')
     client.post('/github/webhook',content=body,headers=signed('security_advisory',body))
-    asyncio.run(Agent(Config(),store,LockGitHub(),CleanOSV()).process(store.claim()))
+    asyncio.run(Agent(intelligence_config(),store,LockGitHub(),CleanOSV()).process(store.claim()))
     impact=store.list_impacts()['items'][0]
     assert impact['state']=='under_investigation' and impact['recommendations']==[]
 
@@ -182,7 +190,7 @@ def test_same_package_with_nonaffected_version_is_not_an_affected_project(tmp_pa
     body=ghsa_body()
     client.post('/github/webhook',content=body,headers=signed('security_advisory',body))
     gh=LockGitHub('{"lockfileVersion":3,"packages":{"node_modules/demo":{"version":"1.0.2"}}}')
-    asyncio.run(Agent(Config(),store,gh,CleanOSV()).process(store.claim()))
+    asyncio.run(Agent(intelligence_config(),store,gh,CleanOSV()).process(store.claim()))
     assert store.list_impacts()['items'][0]['state']=='not_affected'
     assert store.list_advisories()[0]['affected_projects']==0
 
@@ -192,7 +200,7 @@ def test_withdrawal_invalidates_suggestions_and_stale_osv_cannot_resurrect_it(tm
     store.upsert_repo('o/r',1,'main')
     first=ghsa_body()
     client.post('/github/webhook',content=first,headers=signed('security_advisory',first))
-    agent=Agent(Config(),store,LockGitHub(),CleanOSV())
+    agent=Agent(intelligence_config(),store,LockGitHub(),CleanOSV())
     asyncio.run(agent.process(store.claim()))
     withdrawn=ghsa_body(action='withdrawn')
     client.post('/github/webhook',content=withdrawn,headers=signed('security_advisory',withdrawn))
@@ -244,7 +252,7 @@ def test_withdrawal_closes_only_related_findings_and_records_history(tmp_path):
     store.upsert_repo('o/r',1,'main')
     body=ghsa_body()
     client.post('/github/webhook',content=body,headers=signed('security_advisory',body))
-    asyncio.run(Agent(Config(),store,LockGitHub(),CleanOSV()).process(store.claim()))
+    asyncio.run(Agent(intelligence_config(),store,LockGitHub(),CleanOSV()).process(store.claim()))
     store.save_finding('o/r','other','dependency','high','Other',None,'a'*40,{'advisory_id':'UNRELATED'})
     body=ghsa_body(action='withdrawn')
     client.post('/github/webhook',content=body,headers=signed('security_advisory',body))
@@ -269,7 +277,7 @@ def test_github_first_patched_version_string_contract(tmp_path):
     data['security_advisory']['vulnerabilities'][0]['first_patched_version']='1.0.1'
     body=json.dumps(data).encode()
     client.post('/github/webhook',content=body,headers=signed('security_advisory',body))
-    asyncio.run(Agent(Config(),store,LockGitHub(),CleanOSV()).process(store.claim()))
+    asyncio.run(Agent(intelligence_config(),store,LockGitHub(),CleanOSV()).process(store.claim()))
     recommendation=store.list_impacts()['items'][0]['recommendations'][0]
     assert recommendation['recommended_version']=='1.0.1'
 

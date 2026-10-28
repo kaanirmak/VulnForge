@@ -51,3 +51,11 @@ Bu kanıt mevcut migration baseline'ı içindir; bozuk/tamamen özelleştirilmi�
 008 her iki veritabanında runner_policies, runner_receipts ve runner_token_uses tablolarını ekler. Repo kaldırılırsa bu kayıtlar FK cascade ile temizlenir. PostgreSQL tablolarında FORCE RLS ve private operator politikası vardır; müşteri rolüne erişim verilmez. Migration hesabıyla yükselttikten sonra operator provisioning komutunu yeniden çalıştır. Var olan raporlar otomatik envanter veya güvenilir baseline olmaz.
 
 Taşıma testi policy, receipt ve token kullanım özetlerinin SQLite→PostgreSQL geçişinde aynen korunduğunu doğrular. Non-owner operator ile kabul ve müşteri rolüyle SQL reddi gerçek geçici PostgreSQL üzerinde test edildi. [Akış ve kalan canlı kabul](RUNNER_IDENTITY_TR.md).
+
+## 009 — kanıt geçersizleşme zamanı
+
+009 repository kaydına `evidence_invalidated_at` ekler. Varsayılan dal değişikliği veya imzalı varsayılan dal push'u eski snapshot'ın güncel sonuç gibi sunulmasını engeller. Yeni tablo veya rol grant'i yoktur; mevcut repository RLS uygulanır. Timestamp beş müşteri rolü ve SQLite→PostgreSQL aktarımıyla test edildi. Eski kaynak dosyasını taşımadan önce desteklenen güncel şemaya migration hesabıyla yükselt; farklı kolon şeması aktarımda reddedilir. 009 aşamasında 581 test geçti; 010 dahil son doğrulama 642 testtir. [Tazelik politikası](EVIDENCE_FRESHNESS_TR.md).
+
+## 010 — Oturuma bağlı proje bağlantısı
+
+`connection_intents`, tek kullanımlık auth state ve session hash ile bağlantı niyetini, beklenen bağlantıyı ve consent sürümünü bağlar. State/session silinmesi intent’i cascade ile siler. PostgreSQL FORCE RLS ve internal-only erişim kullanır; customer runtime bu tabloyu okuyamaz. İki dialect için toplam 20 migration kaynağı (10’ar) vardır. SQLite→PostgreSQL aktarımı dolu intent ile testlidir; migration sahibi yeni şemayı kurduktan sonra runtime rol doğrulamasını uygula.

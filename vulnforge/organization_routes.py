@@ -54,8 +54,23 @@ class RunnerPolicyChange(BaseModel):
     workflow_ref:str=Field(min_length=1,max_length=512)
 
 
+class OrganizationCreate(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
+    name:str=Field(min_length=1,max_length=100)
+
+
+class ConnectionBegin(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
+    repo:str=Field(pattern=r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$',max_length=256)
+    consent:bool
+    consent_version:Literal['metadata-v1']
+
+
 def install_organization_routes(app,cfg,store):
     sessions=AuthSessions(store,cfg)
+    from .connections import ConnectionFlows,GitHubConnectionVerifier,CALLBACK
+    app.state.connection_verifier=GitHubConnectionVerifier(cfg)
+    flows=ConnectionFlows(store,cfg)
     data_store=store
     if cfg.customer_api_preview and store.backend=='postgresql':
         if not cfg.customer_database_url:
@@ -122,6 +137,41 @@ def install_organization_routes(app,cfg,store):
                 return {'items':Identities(data_store).list_organizations(user['id'])}
         return {'items':Identities(data_store).list_organizations(user['id'])}
 
+    @app.post(ROOT,dependencies=[Depends(csrf)],status_code=201)
+    async def create_organization(body:OrganizationCreate,user=Depends(principal)):
+        try: return Identities(store).create_organization(user['id'],body.name)
+        except ValueError: raise HTTPException(422,'Organization name rejected') from None
+
+    @app.get(CALLBACK)
+    async def connect_callback(request:Request):
+        import re
+        from .auth import AuthError,FLOW_SECONDS
+        from .connections import ConnectionDenied,ConnectionConflict
+        from .github_metadata import MetadataError
+        from fastapi.responses import RedirectResponse
+        if not cfg.github_connection_preview: raise HTTPException(503,'Connection preview is not enabled')
+        user=await principal(request)
+        params=request.state.oauth_callback
+        if (set(params)-{'state','code','error','error_description','error_uri'} or
+            any(len(params.getlist(key))!=1 for key in params) or
+            ('code' in params and 'error' in params) or
+            ('error' not in params and not re.fullmatch(r'[A-Za-z0-9_-]{1,512}',params.get('code','')))):
+            raise HTTPException(400,'Invalid connection callback')
+        try:
+            intent=flows.consume(params.get('state',''),request.cookies.get(sessions.cookie_prefix+'connect',''),
+                                 user['session_hash'])
+            if 'error' in params: raise AuthError('Authorization declined')
+            proof=await app.state.connection_verifier.verify(params['code'],
+                request.cookies.get(sessions.cookie_prefix+'connect',''),intent['repo'],intent['github_id'])
+            flows.complete(intent,proof)
+            outcome='connected'
+        except (AuthError,ConnectionDenied,ConnectionConflict,MetadataError,PermissionError,ValueError):
+            outcome='failed'
+        response=RedirectResponse('/account?connection='+outcome,status_code=303)
+        response.delete_cookie(sessions.cookie_prefix+'connect',path='/',secure=sessions.secure,
+                               httponly=True,samesite='lax')
+        return response
+
     def membership_operation(operation,*args):
         try: return operation(*args)
         except PermissionError: raise HTTPException(403,'Organization administrator permission required') from None
@@ -133,6 +183,19 @@ def install_organization_routes(app,cfg,store):
         return membership_operation(Identities(store).accept_invitation,body.token,user['id'])
 
     router=APIRouter(prefix=ROOT+'/{organization_id}')
+
+    @router.post('/connections/begin',dependencies=[Depends(csrf)])
+    async def begin_connection(organization_id:str,body:ConnectionBegin,user=Depends(principal)):
+        from .auth import FLOW_SECONDS
+        if not cfg.github_connection_preview: raise HTTPException(503,'Connection preview is not enabled')
+        try:
+            location,verifier=flows.begin(organization_id,user['session_hash'],body.repo,body.consent_version,body.consent)
+        except PermissionError: raise HTTPException(403,'Connection is not authorized') from None
+        except ValueError: raise HTTPException(422,'Repository and consent required') from None
+        response=JSONResponse({'authorization_url':location,'expires_in':FLOW_SECONDS,'source_access':False})
+        response.set_cookie(sessions.cookie_prefix+'connect',verifier,max_age=FLOW_SECONDS,path='/',
+                            secure=sessions.secure,httponly=True,samesite='lax')
+        return response
 
     @router.put('/runner-policy',dependencies=[Depends(csrf)])
     async def runner_policy(organization_id:str,body:RunnerPolicyChange,user=Depends(principal)):

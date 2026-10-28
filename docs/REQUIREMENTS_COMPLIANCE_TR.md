@@ -82,3 +82,7 @@ Güncel sıra [TASKS_TR.md](TASKS_TR.md) içinde izlenir: gizlilik kapıları ve
 Offline scanner CLI, yerel testli Action/şablonlar, davet ve session revocation, named operatör erişimi, repo opt-in ve worker heartbeat/dead-letter eklendi. Müşteri önizleme paneli org/proje/bulgu/impact/öneri gösterir. Bu, gerçek provider kabulü veya trusted runner intake anlamına gelmez. Eski doğrulanmamış worker PR yayın yolu kapatıldı; source erişimi olan işlerde bile yayın kapısı bitmeden read-only token istenir. [Toplu durum ve açık gereksinimler](BATCH_PROGRESS_TR.md).
 
 Kimliği doğrulanmış runner önizlemesi: sabit issuer/audience ile RSA/JWKS, protected branch ve SHA-pinned reusable workflow, metadata-only App installation kontrolü ve transaction içinde tekrar yükleme bariyeri eklendi. Kod kaynak erişimli App kurulumunu ve managed/runner önizleme karışımını reddeder. Raporlar yalnız karantinada kalır; canlı installation yetkilendirmesi ve baseline promotion tamamlanmadı. Son tüm-suite doğrulaması gerçek geçici PostgreSQL dahil 522 test, sıfır skip; ayrıntılar [runner protokolünde](RUNNER_IDENTITY_TR.md).
+
+## 28 Ekim güncellemesi
+
+Kanıt tazeliği, kaynak erişimsiz oturuma bağlı proje bağlantısı, zorunlu izin/paylaşım consent’i ve hash kilitli kurulum eklendi. Son yerel doğrulama **642 test, sıfır skip**, gerçek geçici PostgreSQL; Docker build ve ağsız container açılışı geçti. Provider çağrıları mock’tur. Canlı kabul, worker DB izolasyonu, güvenilir baseline ve doğrulanmış düzeltme açıktır. [Hedef ürün mimarisi](../ARCHITECTURE.md) uygulama tamamlanma iddiası değildir.

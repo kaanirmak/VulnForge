@@ -134,8 +134,14 @@ class Store:
                 connection_id=CASE WHEN repositories.installation_id=excluded.installation_id
                     THEN repositories.connection_id ELSE excluded.connection_id END,
                 installation_id=excluded.installation_id,
+                evidence_invalidated_at=CASE WHEN repositories.default_branch<>excluded.default_branch
+                    THEN excluded.updated_at ELSE repositories.evidence_invalidated_at END,
                 default_branch=excluded.default_branch,updated_at=excluded.updated_at""",
                       (name, installation_id, default_branch, now,uuid.uuid4().hex))
+
+    def invalidate_repository_evidence(self,repo):
+        with self.conn() as c:
+            c.execute('UPDATE repositories SET evidence_invalidated_at=? WHERE full_name=?',(time.time(),repo))
 
     def repository(self,repo):
         with self.conn() as c:
@@ -446,7 +452,8 @@ class Store:
                 state='not_affected' if complete and known in ('affected','not_affected') else 'under_investigation'
                 self.save_impact(repo,row['advisory_id'],state,scan_id,
                     {'reason':'not_returned_by_complete_osv_audit' if state=='not_affected' else 'incomplete_inventory_or_source_confirmation_pending',
-                     'reachability':'unknown','coverage_complete':complete,'last_confirmed_state':known},[])
+                     'reachability':'unknown','coverage_complete':complete,'last_confirmed_state':known,
+                     'advisory_sha256':self.advisory(row['advisory_id'])['source_sha256']},[])
 
     def invalidate_impacts(self, repo, scan_id):
         with self.transaction(), self.conn() as c:
@@ -470,10 +477,14 @@ class Store:
         with self.conn() as c:
             rows=c.execute('''SELECT i.*,a.summary,a.aliases,a.source,a.withdrawn FROM advisory_impacts i
                 JOIN advisories a ON a.id=i.advisory_id WHERE '''+' AND '.join(clauses)+' ORDER BY i.id LIMIT ?',args+[limit+1]).fetchall()
-        items=[dict(row) for row in rows[:limit]]
-        for item in items:
-            for field in ('aliases','evidence','recommendations'): item[field]=json.loads(item[field])
-        return {'items':items,'next_cursor':items[-1]['id'] if len(rows)>limit else None}
+            items=[dict(row) for row in rows[:limit]]
+            from .freshness import impact_view
+            cache={}
+            for index,item in enumerate(items):
+                for field in ('aliases','evidence','recommendations'): item[field]=json.loads(item[field])
+                items[index]=impact_view(c,item,cache)
+        return {'items':items,'next_cursor':items[-1]['id'] if len(rows)>limit else None,
+                'filter_scope':'observed_state'}
 
     def list_advisories(self, limit=50):
         with self.conn() as c:
@@ -518,7 +529,18 @@ class Store:
                 rows = c.execute(f"SELECT * FROM {table} WHERE {column}=? ORDER BY {order} LIMIT ?", (repo,limit))
             else:
                 rows = c.execute(f"SELECT * FROM {table} ORDER BY {order} LIMIT ?", (limit,))
-            return [dict(r) for r in rows]
+            items=[dict(r) for r in rows]
+            from .freshness import repository_evidence,scan_evidence,finding_view
+            cache={}
+            for item in items:
+                if table in ('repositories','dependency_inventory'):
+                    repo_name=item['full_name'] if table=='repositories' else item['repo']
+                    if repo_name not in cache: cache[repo_name]=repository_evidence(c,repo_name)
+                    item['evidence_status']=cache[repo_name]
+                elif table=='scans': item['evidence_status']=scan_evidence(c,item,cache)
+                elif table=='findings':
+                    item['details']=json.dumps(finding_view(c,item,cache)['details'])
+            return items
 
     def start_scan(self, repo, kind, sha=None):
         scan_id = uuid.uuid4().hex
@@ -544,6 +566,9 @@ class Store:
             result = dict(row)
             for field in ('coverage','dependencies'): result[field] = json.loads(result[field])
             result['findings'] = [json.loads(r['data']) for r in c.execute('SELECT data FROM scan_findings WHERE scan_id=? ORDER BY finding_key', (scan_id,))]
+            from .freshness import scan_evidence,finding_view
+            result['evidence_status']=scan_evidence(c,result)
+            result['findings']=[finding_view(c,{**finding,'repo':result['repo']}) for finding in result['findings']]
             return result
 
     def expire_suppressions(self):

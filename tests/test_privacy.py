@@ -163,6 +163,33 @@ def test_default_push_does_not_queue_source_fetch_or_store_commit_messages(tmp_p
     assert source not in json.dumps(store.list_rows('repositories'))
 
 
+@pytest.mark.parametrize('event,action',[('installation','created'),('installation_repositories','added'),
+                                       ('dependabot_alert','created')])
+def test_all_default_integration_events_keep_source_queue_closed(tmp_path,event,action):
+    client,store=report_client(tmp_path)
+    body=json.dumps({'action':action,'installation':{'id':1},
+                     'repository':{'full_name':'org/service','default_branch':'main'}}).encode()
+    assert client.post('/github/webhook',content=body,headers=signed(event,body)).json()['queued']==0
+    assert store.repository('org/service') is not None and store.list_rows('jobs')==[]
+
+
+def test_default_advisory_and_manual_refresh_never_schedule_source_access(tmp_path):
+    client,store=report_client(tmp_path);store.upsert_repo('org/service',1,'main')
+    body=json.dumps({'action':'published','security_advisory':{'ghsa_id':'GHSA-FIXTURE','summary':'Synthetic',
+        'vulnerabilities':[{'package':{'ecosystem':'npm','name':'demo'}}]}}).encode()
+    response=client.post('/github/webhook',content=body,headers=signed('security_advisory',body))
+    assert response.json()['queued']==0 and store.list_rows('jobs')==[]
+    assert client.post('/api/v1/intelligence/refresh',headers={'Authorization':'Bearer admin'}).status_code==409
+
+
+def test_default_worker_stops_before_opening_database_or_scheduling(monkeypatch):
+    from vulnforge.worker import run_worker
+    monkeypatch.setattr('vulnforge.worker.Config.from_env',lambda:Config())
+    def forbidden(*args,**kwargs):raise AssertionError('No default worker database access')
+    monkeypatch.setattr('vulnforge.worker.Store',forbidden)
+    with pytest.raises(SystemExit):asyncio.run(run_worker())
+
+
 def test_legacy_dependency_job_is_failed_without_source_fallback(tmp_path):
     class NoSource:
         async def default_branch(self,*args): raise AssertionError('No source API call permitted')

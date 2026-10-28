@@ -18,12 +18,13 @@ def install_auth_routes(app,cfg,store):
     async def auth_privacy_headers(request,call_next):
         path=request.scope['path']
         sensitive=path.startswith('/auth/') or path in ('/account','/api/v1/me')
-        if path=='/auth/github/callback':
+        callbacks=('/auth/github/callback','/auth/github/connect/callback')
+        if any(path==cb or path.startswith(cb+'/') for cb in callbacks):
             raw=request.scope.get('query_string',b'')
             # Routing consumes this private state instead of raw query params.
             # Uvicorn's normal access log then has no callback code/state query.
             request.scope['query_string']=b''
-            if len(raw)>4096:
+            if len(raw)>4096 or path not in callbacks:
                 response=JSONResponse({'detail':'Invalid sign-in callback'},status_code=400)
             else:
                 request.state.oauth_callback=QueryParams(raw)
@@ -55,7 +56,7 @@ def install_auth_routes(app,cfg,store):
 
     @app.get('/auth/status')
     async def status():
-        return {'github_login_configured':cfg.oauth_enabled,'customer_access_ready':False}
+        return {'github_login_configured':cfg.oauth_enabled,'customer_access_ready':False,'github_connection_preview':cfg.github_connection_preview}
 
     @app.get('/auth/github/login')
     async def login(request:Request):

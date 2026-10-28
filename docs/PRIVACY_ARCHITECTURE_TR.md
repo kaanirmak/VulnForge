@@ -73,7 +73,7 @@ OSV_ALLOWED_PACKAGES=PyPI:requests,npm:lodash
 PRIVATE_PACKAGE_PATTERNS=PyPI:company-*,npm:@company/*
 ```
 
-Onay listesi paketlerin gerçekten public olduğunu keşfeden bir kayıt servisi değildir; işletmecinin sınıflandırma beyanıdır. Tenant bazlı onay/geri çekme ekranı VF-026 ve yetki modeliyle birlikte geliştirilecektir. Public CISA KEV erişimi yalnız açık public intelligence modunda açılabilir; private/offline mod için mirror adapter'ı henüz yoktur.
+Onay listesi paketlerin gerçekten public olduğunu keşfeden bir kayıt servisi değildir; işletmecinin sınıflandırma beyanıdır. VF-026 yerel metadata bağlantısı için izin/mod/paylaşım onayını gösterir ve audit eder; bu onay public paket sorgusu, managed kaynak erişimi veya PR yazma izni açmaz. Bunların tenant bazlı ayrı onay/geri çekme akışları açıktır. Public CISA KEV erişimi yalnız açık public intelligence modunda açılabilir; private/offline mod için mirror adapter'ı henüz yoktur.
 
 ## Managed modu açmak
 
@@ -87,7 +87,7 @@ MANAGED_SCAN_CONSENT_ID=owner-approval-2026-10-27
 
 Onay referansı bir kriptografik insan onayı değildir; self-hosted operatörün kaydıdır. Müşteri başına imzalı onay VF-067 kapsamındadır. `ENABLE_AUTO_PR=true` tek başına kaynak erişimini açmaz. Eski kuyruk işleri customer modda kaynak erişim kapısını geçemez.
 
-Standart Compose anahtar dosyası bağlamaz ve customer_runner modunu uygular. Geçici managed pilotu için ayrıca `docker-compose.managed.yml` gerekir; kaynak erişim ayarı ve onay referansı boşsa bu overlay çalışmaz. Anahtar yalnız worker'a bağlanır; API'ye verilmez. KMS/secret store hâlâ VF-083 kapsamında eksiktir.
+Standart Compose yalnız API başlatır, anahtar dosyası bağlamaz ve customer_runner modunu uygular. Customer modunda source job kuyruğa alınmaz ve source worker başlamaz. Yerel metadata bağlantısı preview overlay’i API’ye ayrı metadata App anahtarı bağlar; kaynak izni istemez. Geçici managed pilotu için ayrıca `docker-compose.managed.yml` gerekir; kaynak erişim ayarı ve onay referansı boşsa bu overlay çalışmaz. Anahtar yalnız worker'a bağlanır; API'ye verilmez. KMS/secret store hâlâ VF-083 kapsamında eksiktir.
 
 ## Tehdit modeli ve kalan kontroller
 

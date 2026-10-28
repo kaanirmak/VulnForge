@@ -38,6 +38,7 @@ def registration(origin,mode='customer_runner',*,public=False,checks=False):
     events=[] if mode=='customer_runner' else ['push','pull_request']
     fields=[('name','VulnForge-'+mode),('url',origin),('public',str(public).lower()),
             ('callback_urls[]',origin+'/auth/github/callback'),
+            ('callback_urls[]',origin+'/auth/github/connect/callback'),
             ('request_oauth_on_install','false'),('webhook_active','true'),
             ('webhook_url',origin+'/github/webhook')]
     fields.extend(permissions.items());fields.extend(('events[]',event) for event in events)

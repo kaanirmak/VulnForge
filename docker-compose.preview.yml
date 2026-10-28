@@ -1,0 +1,14 @@
+# Local metadata-only onboarding, never public deployment or source scanning.
+# Set PUBLIC_ORIGIN to a loopback origin and GITHUB_PRIVATE_KEY_PATH outside checkout.
+services:
+  api:
+    environment:
+      SCAN_MODE: customer_runner
+      ALLOW_MANAGED_SOURCE_ACCESS: "false"
+      GITHUB_PRIVATE_KEY_PATH: /run/secrets/github_metadata_key
+      CUSTOMER_API_PREVIEW: "true"
+      ALLOW_INSECURE_LOCAL_AUTH: "true"
+      GITHUB_CONNECTION_PREVIEW: "true"
+      PUBLIC_ORIGIN: ${PUBLIC_ORIGIN:?Set the exact loopback callback origin}
+    volumes:
+      - ${GITHUB_PRIVATE_KEY_PATH:?Set the metadata-only App key file}:/run/secrets/github_metadata_key:ro

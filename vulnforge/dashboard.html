@@ -47,7 +47,7 @@ let [repos,findings,jobs,prs,scans,overview,privacy]=await Promise.all(['/api/re
 document.getElementById('privacy_status').textContent=(privacy.server_source_access?'Yönetilen tarama: kaynak erişimi açık. ':'Müşteri koşucusu modu: sunucunun kaynak erişimi kapalı. ')+(privacy.intelligence_mode==='disabled'?'Dış açık veritabanına paket paylaşımı kapalı. ':'Paket sorguları yapılandırılmış paylaşım politikasına bağlı. ')+(!privacy.customer_ingestion_ready?'Müşteri raporu kabulü henüz hazır değil; operatör raporları karantinada kalır. ':'')+(!privacy.tenant_isolation_ready?'Organizasyonlar arası veri yalıtımı henüz hazır değil.':'');
 document.getElementById('repos_n').textContent=overview.repositories;document.getElementById('finds_n').textContent=overview.open_findings;document.getElementById('prs_n').textContent=overview.remediations;
 document.getElementById('message').textContent=overview.incomplete_repositories ? overview.incomplete_repositories+' depoda eksik/başarısız bağımlılık taraması var. Bulgular ve listeler son kayıtlarla sınırlıdır.' : 'Listeler son kayıtları gösterir; sayaçlar toplamdır.';
-table('scans',['Repository','SHA','Tür','Durum','Taranan / Atlanan','Kapsama sorunları'],scans.slice(0,30).map(s=>{const c=JSON.parse(s.coverage);return [s.repo,(s.commit_sha||'unknown').slice(0,12),s.kind,s.state,(c.files_scanned||0)+' / '+(c.files_skipped||0),(c.issues||[]).map(i=>(i.path?i.path+': ':'')+i.reason).join('; ')];}));
+table('scans',['Repository','SHA','Tür','Durum','Kanıt tazeliği','Taranan / Atlanan','Kapsama sorunları'],scans.slice(0,30).map(s=>{const c=JSON.parse(s.coverage);return [s.repo,(s.commit_sha||'unknown').slice(0,12),s.kind,s.state,s.evidence_status?.status==='fresh_snapshot'?'Yakın tarihli anlık görüntü':'Yeniden inceleme gerekli',(c.files_scanned||0)+' / '+(c.files_skipped||0),(c.issues||[]).map(i=>(i.path?i.path+': ':'')+i.reason).join('; ')];}));
 const exports=document.getElementById('exports');exports.replaceChildren();
 for(const scan of scans.slice(0,10)){
  if(scan.state==='running')continue;
@@ -72,14 +72,14 @@ async function loadImpacts(more=false){
   if(repo)params.set('repo',repo);if(advisory)params.set('advisory_id',advisory);
   const [data,advisories]=await Promise.all([get('/api/v1/impacts?'+params),get('/api/v1/advisories')]);
   impactItems.push(...data.items);impactCursor=data.next_cursor;
-  table('advisories',['Açık','Özet','Etkilenen proje','İncelenen proje','Son gözlem'],advisories.map(a=>[a.id,a.summary,a.affected_projects,a.pending_projects,new Date(a.updated_at*1000).toLocaleString()]));
+  table('advisories',['Açık','Özet','Etki gözlenen proje','İncelenen proje','Son gözlem'],advisories.map(a=>[a.id,a.summary,a.affected_projects,a.pending_projects,new Date(a.updated_at*1000).toLocaleString()]));
   const rows=[];
   for(const impact of impactItems){
    const evidence=impact.evidence;
    if(impact.recommendations.length){
-    for(const rec of impact.recommendations)rows.push([impact.advisory_id,impact.repo,impactStates[impact.state],rec.package+' ('+rec.ecosystem+')',rec.current_version,
-     rec.recommended_version||recommendationStates[rec.status]||rec.status,rec.upgrade_class||'İnceleme gerekli',rec.file_path+' · '+(evidence.commit_sha||'').slice(0,12)]);
-   }else rows.push([impact.advisory_id,impact.repo,impactStates[impact.state],'—','—','Güncel öneri yok','—',evidence.reason||'']);
+    for(const rec of impact.recommendations)rows.push([impact.advisory_id,impact.repo,impactStates[impact.assessment_state||impact.state]+(impact.freshness?.status!=='fresh_snapshot'?' · Kanıt güncel/tam değil':' · Anlık görüntü'),rec.package+' ('+rec.ecosystem+')',rec.current_version,
+     rec.recommended_version||(rec.status==='needs_reverification'?'Yeniden doğrulama gerekli':recommendationStates[rec.status]||rec.status),rec.upgrade_class||'İnceleme gerekli',rec.file_path+' · '+(evidence.commit_sha||'').slice(0,12)]);
+   }else rows.push([impact.advisory_id,impact.repo,impactStates[impact.assessment_state||impact.state]+(impact.freshness?.status!=='fresh_snapshot'?' · Kanıt güncel/tam değil':' · Anlık görüntü'),'—','—','Güncel öneri yok','—',evidence.reason||'']);
   }
   table('impacts',['Açık','Proje','Etki','Paket','Mevcut sürüm','Öneri','Güncelleme türü','Kanıt'],rows);
   document.getElementById('more_impacts').hidden=!impactCursor;

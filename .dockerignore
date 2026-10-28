@@ -1,6 +1,8 @@
 # Only the application and build metadata enter the Docker build context.
 **
 !pyproject.toml
+!requirements/
+!requirements/**
 !vulnforge/
 !vulnforge/**
 vulnforge/**/__pycache__/

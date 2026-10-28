@@ -59,7 +59,7 @@ def signed_in(auth_app):
 
 def test_oauth_default_is_closed(tmp_path):
     client=TestClient(create_app(Config(),Store(str(tmp_path/'db'))))
-    assert client.get('/auth/status').json()=={'github_login_configured':False,'customer_access_ready':False}
+    assert client.get('/auth/status').json()=={'github_login_configured':False,'customer_access_ready':False,'github_connection_preview':False}
     assert client.get('/auth/github/login').status_code==503
     assert client.get('/api/v1/me').status_code==503
 

@@ -4,6 +4,8 @@ VulnForge artık bir güvenlik duyurusunun hangi kayıtlı projelere değdiğini
 
 27 Ekim gizlilik değişikliği: varsayılan kaynak erişimi ve OSV sorguları kapalıdır. Aşağıdaki mevcut akış, açık onaylı managed tarama ve ayrıca etkin intelligence politikasıyla çalışır. Public OSV için tam paket allowlist'i ve metadata paylaşım izni gerekir; özel paket engeli önce gelir. Müşteri koşucusu envanterinin doğrulanmış kabulü henüz yoktur. [Modlar ve veri paylaşımı](PRIVACY_ARCHITECTURE_TR.md).
 
+28 Ekim tazelik kontrolü: eksik/eski snapshot veya sorgu kanıtı, yeni varsayılan dal push'u ve değişmiş advisory hash'i eski önerinin güncel sürüm olarak gösterilmesini engeller. Tarihsel `not_affected`, geçerli kanıt yoksa etkili `under_investigation` olur. API, müşteri/operatör ekranı ve exportlar aynı değerlendirmeyi kullanır. [Süreler, filtre anlamı ve sınırlar](EVIDENCE_FRESHNESS_TR.md).
+
 ## Nasıl işler?
 
 1. İmzalı GitHub `security_advisory` olayı alınır. Duyuru, CVE/GHSA alias'ları, kaynak özeti ve hash'i saklanır. Inventory'de eşleşen ve inventory'si eksik/bilinmeyen projeler yeniden değerlendirme kuyruğuna alınır. Önceden etkilendiği bilinen projeler de güncellenen duyurularda yeniden kontrol edilir.

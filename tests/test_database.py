@@ -37,7 +37,7 @@ def test_existing_sqlite_schema_is_upgraded_without_deleting_records(tmp_path):
                   ('fixture/repo',1,'main',time.time()))
     upgraded=Store(str(path))
     assert upgraded.list_rows('repositories')[0]['full_name']=='fixture/repo'
-    with upgraded.conn() as c: assert c.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0]==8
+    with upgraded.conn() as c: assert c.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0]==10
 
 
 def test_applied_migration_drift_is_rejected(tmp_path):
@@ -164,7 +164,8 @@ def test_postgres_transactions_and_queue_claims_are_atomic(pg_store):
 
 def test_postgres_api_round_trip(pg_store):
     store=pg_store;store.upsert_repo('org/service',1,'main')
-    client=TestClient(create_app(Config(admin_token='fixture-admin'),store))
+    client=TestClient(create_app(Config(admin_token='fixture-admin',scan_mode='managed',
+        allow_managed_source_access=True,managed_scan_consent_id='fixture-only'),store))
     auth={'Authorization':'Bearer fixture-admin'}
     assert client.get('/api/v1/overview',headers=auth).json()['repositories']==1
     assert client.post('/api/v1/intelligence/refresh',headers=auth).json()['queued']==1

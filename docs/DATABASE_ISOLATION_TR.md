@@ -61,7 +61,7 @@ Transaction scope dışındaki proje sorguları boş sonuç verir. Commit/rollba
 
 ## Politika kapsamı
 
-23 uygulama tablosunda ENABLE + FORCE RLS vardır; davet, repo düzeltme politikası ve üç runner identity tablosu customer rolüne kapalıdır. Repo, finding, inventory, scan ve alt bulgular, remediation, advisory/alias/impact, ownership ve audit politikaları organizasyon/üyelik sınırını uygular. Ortak public advisory'nin müşteriyle ilişkili kayıtları yalnız görünür impact üzerinden erişilebilir. Users/organizasyon/üyelik erişimi mevcut aktöre bağlıdır; gerekli olmayan users tablosuna müşteri GRANT'i verilmez.
+24 uygulama tablosunda ENABLE + FORCE RLS vardır; davet, repo düzeltme politikası ve üç runner identity tablosu customer rolüne kapalıdır. Repo, finding, inventory, scan ve alt bulgular, remediation, advisory/alias/impact, ownership ve audit politikaları organizasyon/üyelik sınırını uygular. Ortak public advisory'nin müşteriyle ilişkili kayıtları yalnız görünür impact üzerinden erişilebilir. Users/organizasyon/üyelik erişimi mevcut aktöre bağlıdır; gerekli olmayan users tablosuna müşteri GRANT'i verilmez.
 
 Findings güncellemesinde yalnız `status` kolonuna izin verilir. Org Admin/Maintainer süreli risk kabulü yapabilir; Analyst open/resolved ile sınırlıdır. Viewer/Auditor normal triage yapamaz. Süresi dolmuş kendi bulgusunun yalnız open'a dönmesi, sınırlı system expiry istisnasıdır. Audit'e yalnız yetkili triage/export isteği veya bu expiry kaydı eklenebilir; aktör/org/ilgili kayıt kontrol edilir. Audit read sadece Org Admin/Auditor'dadır. Bu kontrol operatör audit'ini tümüyle immutable yapmaz; VF-085 açık kalır.
 

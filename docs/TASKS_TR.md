@@ -1,12 +1,12 @@
 # VulnForge — tüm iş listesi
 
-27 Ekim 2026 güncellemesi. Kaynak: teknik tasarım belgesi, mevcut çalışma ağacı, gereksinim raporu ve kaynak kodunun müşteri ortamında kalmasını sağlayacak bağlantı modeli.
+28 Ekim 2026 güncellemesi. Kaynak: teknik tasarım belgesi, mevcut çalışma ağacı, gereksinim raporu ve kaynak kodunun müşteri ortamında kalmasını sağlayacak bağlantı modeli.
 
 İşaretli maddeler aşağıdaki kanıt kapsamıyla tamamlandı; boş kutular açık işlerdir. İşaretler bütün ürünün veya canlı ortamın hazır olduğu anlamına gelmez. Öncelikler: P0 gerçek özel repolu kullanıcı almadan önce; P1 ürün pilotunu tamamlamak için; P2 sonraki ürün fazları. Görev grupları arasında bağımlılıklar vardır; numara sırası tek başına uygulama sırası değildir.
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 522 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 642 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -42,7 +42,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [ ] VF-023: Panelde GitHub ile giriş ve Proje bağla akışını oluştur.
 - [ ] VF-024: Kurulum dönüşünü oturum ve kurulum yetkisiyle doğrula; rastgele installation_id ile hesap bağlanmasını engelle.
 - [ ] VF-025: Kullanıcının erişebildiği kurulum ve repoları listele; repo seçimi/senkronizasyonu ekle.
-- [ ] VF-026: Kullanıcıya istenen izinleri, tarama modunu ve veri paylaşımını onay öncesinde göster.
+- [x] VF-026: Kullanıcıya istenen izinleri, tarama modunu ve veri paylaşımını onay öncesinde göster.
 - [ ] VF-027: İlk tarama/ilk envanter akışını kur; bekleyen ve hatalı kurulum durumlarını göster.
 - [ ] VF-028: Repo ekleme/çıkarma, uninstall, suspend/unsuspend ve yetki değişimini uzlaştır.
 - [x] VF-029: Süresi kısa, repo/izin kapsamı daraltılmış installation token kullanımını uygula.
@@ -54,6 +54,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [ ] VF-032: CLI'ı çalıştıran GitHub Action ve kuruluma hazır workflow şablonları oluştur.
 - [ ] VF-033: Push/PR, varsayılan dal ve zamanlanmış tarama profillerini ekle.
 - [ ] VF-034: İlk kurulumda geçmiş/snapshot kapsamını açıkça göster; eksik envanteri geçerli baseline sayma.
+  Snapshot/geçmiş ve tazelik API/ekran/export uyarıları eklendi; ilk kurulum ve müşteri baseline promotion kabulü açık. [Kanıt sınırı](EVIDENCE_FRESHNESS_TR.md).
 - [ ] VF-035: Sonuç yüklemek için OIDC doğrulaması veya eşdeğer kısa ömürlü kimlik mekanizması kur.
   Kriptografik doğrulama, metadata-only App kontrolü, yerel policy/API/client ve reusable workflow şablonu eklendi; gerçek sağlayıcı/kurulum kabulü bekliyor. [Kod, kanıt ve sınırlar](RUNNER_IDENTITY_TR.md).
 - [ ] VF-036: Yüklemede repo, organizasyon, SHA, workflow kimliği, güvenilen workflow ref'i ve izin kapsamını doğrula; beyanı tek başına kanıt sayma.
@@ -80,7 +81,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [ ] VF-051: Ayrı advisory ingestion görevi oluştur; kaynak cursor'u, tekrar ve kesinti sonrası devamı kalıcı tut.
 - [ ] VF-052: GHSA değişiklik/withdrawal akışını uzlaştır; OSV ile alias ve revision geçmişini ilişkilendir.
 - [ ] VF-053: NVD/CVSS ve EPSS kaynaklarını ekle; KEV ile birlikte kaynak/zaman/hash kanıtını koru.
-- [ ] VF-054: Eksik veya eski envanter ile eski istihbaratı görünür yap; güvenli sonuç veya güncel öneri olarak sunma.
+- [x] VF-054: Eksik veya eski envanter ile eski istihbaratı görünür yap; güvenli sonuç veya güncel öneri olarak sunma.
 - [ ] VF-055: Ekosisteme uygun sürüm karşılaştırmalarını genişlet; desteklenmeyen aralığı unknown tut.
 - [ ] VF-056: Yeni açık→paket→proje→snapshot ilişkisini sürümlü geçmişiyle sakla.
 - [ ] VF-057: Önerilen sürümün gerçekten yayımlandığını ve yank/deprecation durumunu paket kaydından doğrula.
@@ -162,9 +163,9 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - Genel yayın: ilgili P0 görevleri, canlı kabul, silme/rotasyon/geri yükleme ve güvenlik incelemesi sonuçlanır. VF-101–110 ilk pilotun zorunlu ön koşulları değildir.
 - Her görev ancak gerekli kod, anlamlı doğrulama, yetki/veri etkisi ve ilgili dokümantasyon birlikte tamamlandığında kapatılır. Canlı kanıt gerektiren görevler mock testle kapatılmaz.
 
-## Tamamlanma kanıtları — 27 Ekim 2026
+## Tamamlanma kanıtları — 28 Ekim 2026
 
-**24/110 madde tamamlandı (VF-001–012, VF-015–017, VF-020/021/029/031/037/038/040/061/086).** Bu sayı iş maddesi sayımıdır; ürünün hazır olma oranı veya bütün güvenlik kontrollerinin tamamlandığı iddiası değildir. Sıradaki açık iş **VF-013: GitHub ile giriş**. VF-013/014 kodu ve 40 auth protokol testi eklendi; gerçek GitHub App/HTTPS callback kabulü beklediği için kutuları açık kaldı. [Kurulum ve kanıt](GITHUB_LOGIN_TR.md). Kullanıcı HTTPS adresinin henüz olmadığını bildirdi; canlı aşama beklemede. Bu dış bağımlılığı beklerken bağımsız VF-015/016 API kontrolleri yerel önizleme kapsamında tamamlandı. VF-017, ayrı non-owner runtime hesapları ve PostgreSQL RLS ile tamamlandı. Toplu uygulama ile VF-020/021/029/031/037/038/040/061/086 tamamlandı; VF-018/019, Action dağıtımı ve müşteri paneli gibi diğer maddelerde kısmi ilerleme var. [Toplu çalışma kaydı](BATCH_PROGRESS_TR.md).
+**26/110 madde tamamlandı (VF-001–012, VF-015–017, VF-020/021/026/029/031/037/038/040/054/061/086).** Bu sayı iş maddesi sayımıdır; ürünün hazır olma oranı veya bütün güvenlik kontrollerinin tamamlandığı iddiası değildir. Sıradaki açık iş **VF-013: GitHub ile giriş**. VF-013/014 kodu ve 40 auth protokol testi eklendi; gerçek GitHub App callback kabulü beklediği için kutuları açık kaldı. [Kurulum ve kanıt](GITHUB_LOGIN_TR.md). Kullanıcı HTTPS adresinin henüz olmadığını bildirdi. İlk gerçek OAuth/bağlantı testi iki loopback callback ile yapılabilir; public üretim kurulumu HTTPS bekler. [Yerel hazırlık](USER_NEXT_STEPS_TR.md). Bu dış bağımlılığı beklerken bağımsız VF-015/016 API kontrolleri yerel önizleme kapsamında tamamlandı. VF-017, ayrı non-owner runtime hesapları ve PostgreSQL RLS ile tamamlandı. Toplu uygulama ile VF-020/021/026/029/031/037/038/040/054/061/086 tamamlandı; VF-018/019, Action dağıtımı ve müşteri paneli gibi diğer maddelerde kısmi ilerleme var. [Toplu çalışma kaydı](BATCH_PROGRESS_TR.md).
 
 | İşler | Çıktı ve kanıt | Kapsam sınırı |
 |---|---|---|
@@ -180,17 +181,19 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 
 | VF-017 | [PostgreSQL izolasyon rehberi](DATABASE_ISOLATION_TR.md), migration 004, FORCE RLS, ayrı customer/operator runtime, oturum kanıtı ve fail-closed rol/ACL kontrolleri; 44 yeni RLS/parser testi | Gerçek geçici PostgreSQL 14.23; non-superuser migration sahibi ve iki non-owner runtime ile doğrulandı. SQLite RLS sunmaz; worker/queue, canlı kabul ve üretim altyapısı açık. |
 
-Doğrulama: **522 test geçti, atlanan test yok**. Yeni `scripts/check.py --postgres` kendi geçici yerel PostgreSQL kümesini oluşturup testlerden sonra kapatıp temizledi. Mevcut test kümesi ayrıca kapatıldı. Wheel oluşturuldu; 16 SQL migration, iki HTML ekranı ve CLI giriş noktası kontrol edildi, paketten bağımsız SQLite/CLI açılışı doğrulandı. Action/workflow YAML ve iki ekranın JavaScript sözdizimi kontrol edildi. Müşteri ekranı yalnız sahte iki kuruluş verisiyle yerel tarayıcıda, filtre ve görünüm bakımından incelendi; bu canlı müşteri kabulü değildir. Suite'de bir üçüncü taraf Starlette/httpx deprecation uyarısı var. Canlı GitHub/OSV, GitHub Action, Docker build, trusted runner upload, worker DB izolasyonu ve gerçek iki-müşteri kabulü açık kalır. Bağımlılıklar tamamen hash ile kilitlenmedi ve yayın yapılmadı.
+Doğrulama: **642 test geçti, atlanan test yok**. Yeni `scripts/check.py --postgres` kendi geçici yerel PostgreSQL kümesini oluşturup testlerden sonra kapatıp temizledi. Mevcut test kümesi ayrıca kapatıldı. Wheel oluşturuldu; 20 SQL migration, iki HTML ekranı ve CLI giriş noktası kontrol edildi, paketten bağımsız SQLite/CLI açılışı doğrulandı. Action/workflow YAML ve iki ekranın JavaScript sözdizimi kontrol edildi. Müşteri ekranı yalnız sahte iki kuruluş verisiyle yerel tarayıcıda, filtre ve görünüm bakımından incelendi; bu canlı müşteri kabulü değildir. Suite'de bir üçüncü taraf Starlette/httpx deprecation uyarısı var. Hash kilitleriyle temiz kurulum, Docker build ve ağsız/read-only container açılışı geçti. Canlı GitHub/OSV, GitHub Action, trusted runner upload, worker DB izolasyonu ve gerçek iki-müşteri kabulü açık kalır. Yayın yapılmadı. [Kurulum kanıtı](REPRODUCIBLE_SETUP_TR.md).
 
 | Yeni tamamlananlar | Çıktı ve kanıt | Kapsam sınırı |
 |---|---|---|
 | VF-020 | `/account` ve `/operator` ayrımı; named operator credentials, sır içermeyen erişim audit'i ve 11 test | Global operatör yetkisi; merkezi sır kasası/MFA/immutable audit açık. |
 | VF-021 | `github_app.py`: modlara ayrılmış izinlerle yerel kayıt hazırlığı ve HTTPS/policy testleri | Gerçek App, HTTPS ve kurulum kabulü VF-022–028/094. |
+| VF-026 | Yerel proje bağlantısında Metadata read, customer-runner modu, hassas metadata ve kapalı kaynak/dış paylaşım/yazma kapıları onaydan önce gösterilir; sürümlü zorunlu consent, CSRF ve audit; 42 bağlantı testi ve tarayıcıda boş consent reddi | VF-023/024/025 canlı kabul, kurulum seçicisi ve sürekli uzlaştırma açık; diğer modlara izin vermez. [Protokol](PROJECT_CONNECTION_TR.md). |
 | VF-029 | Bağlantı/claim kontrolü, repo daraltılmış token isteği, job-local cache temizliği, read-only worker yazma kapısı | Canlı token kabulü yapılmadı; fixture/provider sözleşmesi test edildi. |
 | VF-031 | Kurulabilir offline CLI, güvenli descriptor-relative okuma, limits/coverage, metadata-only v1 çıktı | Temel AST/regex ve altı parser; Semgrep/Gitleaks/resolver ayrı açık işlerdir. |
 | VF-040 | Kaynak kopyalamayan CLI/Action; atomik owner-only rapor, iptal/hata cleanup ve sınırlı cleanup komutu | POSIX customer runner; host crash/SIGKILL ephemeral-runner/retention gerektirir. |
 | VF-061 | Org Admin + CSRF ile connection-bound repo opt-in, exact paket/dosya allowlist; merge ve doğrulanmamış yayın engeli | Gerçek patch/build/test/approval/publication VF-062–070'te açık. |
 | VF-037–038 | [Koşucu kimliği ve karantina](RUNNER_IDENTITY_TR.md); PR/fork/dynamic/unknown workflow privilege reddi, v1 şema/1 MB/secret-source filtresi, canonical dedup/replay/conflict ve transaction kanıtı | Gerçek RSA/JWKS fixture ve yerel PostgreSQL; production intake ve baseline promotion kapalı; canlı kabul VF-035/036/094. |
+| VF-054 | [Kanıt tazeliği](EVIDENCE_FRESHNESS_TR.md); 24 saat envanter/1 saat sorgu kanıtı, push/dal/revision invalidation, son başarısız/kısmi tarama, tarihsel öneri ve etkili durum; 59 yeni test | Gerçek geçici PostgreSQL, beş rol, API/export ve transfer; feed sync/cursor, canlı provider/kurulum, current HEAD ve release/test doğrulaması açık. |
 | VF-086 | 60 saniye heartbeat/300 saniye lease, 1800 saniye timeout, retry/backoff/4 deneme, audited single-use dead-letter retry | Ayrı worker DB rolü, adalet/kota ve alarm işletimi açık. |
 
 ## Referanslar
