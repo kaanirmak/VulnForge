@@ -944,6 +944,20 @@ class Store:
                 return False, 'diff_content_changed'
             return True, None
 
+    def _ensure_notifications_table(self, c):
+        c.execute('''CREATE TABLE IF NOT EXISTS notification_channels (
+            id TEXT PRIMARY KEY,
+            organization_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            target TEXT NOT NULL,
+            events TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at REAL NOT NULL,
+            updated_at REAL NOT NULL
+        )''')
+        c.execute('CREATE INDEX IF NOT EXISTS notif_channels_org_idx ON notification_channels(organization_id)')
+
     def pending_impact(self, repo, advisory_id, delivery):
         advisory=self.advisory(advisory_id)
         state='withdrawn' if advisory['withdrawn'] else 'under_investigation'

@@ -35,6 +35,23 @@ class PatchApprovalRequest(BaseModel):
     diff_sha256:str=Field(pattern=r'^[0-9a-f]{64}$')
 
 
+class NotificationChannelCreate(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
+    name:str=Field(min_length=1,max_length=100)
+    kind:Literal['email','slack','teams']
+    target:str=Field(min_length=3,max_length=512)
+    events:list[str]=Field(default_factory=lambda:['scan_completed','critical_finding'],max_length=20)
+    enabled:bool=True
+
+
+class NotificationChannelUpdate(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
+    name:str=Field(min_length=1,max_length=100)
+    target:str=Field(min_length=3,max_length=512)
+    events:list[str]=Field(default_factory=lambda:['scan_completed','critical_finding'],max_length=20)
+    enabled:bool
+
+
 class InvitationRequest(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
     github_id:int=Field(gt=0,lt=2**63)
@@ -341,5 +358,28 @@ def install_organization_routes(app,cfg,store):
     async def audit(repo:str|None=None,limit:int=Query(50,ge=1,le=100),
                     cursor:int=Query(0,ge=0),data=Depends(scoped)):
         return data.audit(repo,cursor,limit)
+
+    @router.get('/notifications/channels')
+    async def notification_channels(data=Depends(scoped)):
+        return {'items':data.list_notification_channels()}
+
+    @router.post('/notifications/channels',dependencies=[Depends(csrf)],status_code=201)
+    async def create_notification_channel(body:NotificationChannelCreate,data=Depends(scoped)):
+        try: return data.create_notification_channel(body.name,body.kind,body.target,body.events,body.enabled)
+        except ValueError as exc: raise HTTPException(422,str(exc)) from None
+
+    @router.put('/notifications/channels/{channel_id}',dependencies=[Depends(csrf)])
+    async def update_notification_channel(channel_id:str,body:NotificationChannelUpdate,data=Depends(scoped)):
+        try: return data.update_notification_channel(channel_id,body.name,body.target,body.events,body.enabled)
+        except ValueError as exc: raise HTTPException(422,str(exc)) from None
+
+    @router.delete('/notifications/channels/{channel_id}',dependencies=[Depends(csrf)],status_code=204)
+    async def delete_notification_channel(channel_id:str,data=Depends(scoped)):
+        data.delete_notification_channel(channel_id)
+
+    @router.post('/notifications/channels/{channel_id}/test',dependencies=[Depends(csrf)])
+    async def test_notification_channel(channel_id:str,data=Depends(scoped)):
+        try: return await data.test_notification_channel(channel_id)
+        except Exception as exc: raise HTTPException(502,f'Notification test failed: {str(exc)}') from None
 
     app.include_router(router)

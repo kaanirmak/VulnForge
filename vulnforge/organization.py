@@ -682,6 +682,138 @@ class OrganizationData:
                 'diff_sha256': diff_sha256
             }
 
+    def list_notification_channels(self) -> list[dict]:
+        with self.access('project.read') as c:
+            if self.store.backend == 'sqlite':
+                try: self.store._ensure_notifications_table(c)
+                except Exception: pass
+            try:
+                rows = c.execute(
+                    'SELECT id, organization_id, name, kind, target, events, enabled, created_at, updated_at FROM notification_channels WHERE organization_id=? ORDER BY created_at ASC',
+                    (self.organization_id,)
+                ).fetchall()
+                res = []
+                for r in rows:
+                    item = dict(r)
+                    item['events'] = json.loads(item['events']) if isinstance(item['events'], str) else item['events']
+                    item['enabled'] = bool(item['enabled'])
+                    res.append(item)
+                return res
+            except Exception:
+                return []
+
+    def create_notification_channel(self, name: str, kind: str, target: str, events: list[str], enabled: bool = True) -> dict:
+        import uuid
+        from .notifications import validate_channel_target, SUPPORTED_CHANNELS
+        if kind not in SUPPORTED_CHANNELS:
+            raise ValueError(f'Invalid channel kind: {kind}')
+        validate_channel_target(kind, target)
+        if not name or len(name) > 100:
+            raise ValueError('Invalid channel name')
+        now = time.time()
+        channel_id = 'chan_' + uuid.uuid4().hex[:16]
+        with self.access('finding.triage') as c:
+            if self.store.backend == 'sqlite':
+                try: self.store._ensure_notifications_table(c)
+                except Exception: pass
+            c.execute(
+                '''INSERT INTO notification_channels (id, organization_id, name, kind, target, events, enabled, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (channel_id, self.organization_id, name, kind, target, json.dumps(events), 1 if enabled else 0, now, now)
+            )
+            self.store.audit_event(
+                'org:' + self.organization_id, None, self.user_id, 'notification_channel_created',
+                {'channel_id': channel_id, 'name': name, 'kind': kind}
+            )
+            return {
+                'id': channel_id,
+                'organization_id': self.organization_id,
+                'name': name,
+                'kind': kind,
+                'target': target,
+                'events': events,
+                'enabled': enabled,
+                'created_at': now,
+                'updated_at': now
+            }
+
+    def update_notification_channel(self, channel_id: str, name: str, target: str, events: list[str], enabled: bool) -> dict:
+        with self.access('finding.triage') as c:
+            if self.store.backend == 'sqlite':
+                try: self.store._ensure_notifications_table(c)
+                except Exception: pass
+            row = c.execute(
+                'SELECT * FROM notification_channels WHERE id=? AND organization_id=?',
+                (channel_id, self.organization_id)
+            ).fetchone()
+            if not row:
+                raise ResourceNotFound('Notification channel not found')
+            kind = row['kind']
+            from .notifications import validate_channel_target
+            validate_channel_target(kind, target)
+            now = time.time()
+            c.execute(
+                '''UPDATE notification_channels SET name=?, target=?, events=?, enabled=?, updated_at=?
+                   WHERE id=? AND organization_id=?''',
+                (name, target, json.dumps(events), 1 if enabled else 0, now, channel_id, self.organization_id)
+            )
+            self.store.audit_event(
+                'org:' + self.organization_id, None, self.user_id, 'notification_channel_updated',
+                {'channel_id': channel_id, 'name': name}
+            )
+            return {
+                'id': channel_id,
+                'organization_id': self.organization_id,
+                'name': name,
+                'kind': kind,
+                'target': target,
+                'events': events,
+                'enabled': enabled,
+                'created_at': row['created_at'],
+                'updated_at': now
+            }
+
+    def delete_notification_channel(self, channel_id: str) -> None:
+        with self.access('finding.triage') as c:
+            if self.store.backend == 'sqlite':
+                try: self.store._ensure_notifications_table(c)
+                except Exception: pass
+            row = c.execute(
+                'SELECT * FROM notification_channels WHERE id=? AND organization_id=?',
+                (channel_id, self.organization_id)
+            ).fetchone()
+            if not row:
+                raise ResourceNotFound('Notification channel not found')
+            c.execute('DELETE FROM notification_channels WHERE id=? AND organization_id=?',
+                      (channel_id, self.organization_id))
+            self.store.audit_event(
+                'org:' + self.organization_id, None, self.user_id, 'notification_channel_deleted',
+                {'channel_id': channel_id}
+            )
+
+    async def test_notification_channel(self, channel_id: str) -> dict:
+        with self.access('finding.triage') as c:
+            if self.store.backend == 'sqlite':
+                try: self.store._ensure_notifications_table(c)
+                except Exception: pass
+            row = c.execute(
+                'SELECT * FROM notification_channels WHERE id=? AND organization_id=?',
+                (channel_id, self.organization_id)
+            ).fetchone()
+            if not row:
+                raise ResourceNotFound('Notification channel not found')
+            channel = dict(row)
+            channel['events'] = json.loads(channel['events']) if isinstance(channel['events'], str) else channel['events']
+            from .notifications import NotificationDispatcher
+            dispatcher = NotificationDispatcher()
+            result = await dispatcher.dispatch(
+                channel,
+                'test_ping',
+                'Test Notification from VulnForge',
+                {'message': 'This is a test notification verifying your channel configuration.', 'status': 'ok'}
+            )
+            return result
+
     def impacts(self,repo=None,advisory_id=None,state=None,cursor=0,limit=50,ecosystem=None,package=None,assigned_to=None):
         with self.access('impact.read') as c:
             self._repo(c,repo)

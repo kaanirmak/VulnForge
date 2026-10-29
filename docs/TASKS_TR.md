@@ -126,7 +126,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-075: False positive, kabul edilen risk ve süreli suppression işlemlerini rollere bağla.
 - [x] VF-076: Onay bekleyen, doğrulanan, engellenen ve yayımlanan düzeltmeleri ayrı göster.
   `OrganizationData.remediation_plans` ve `GET /api/v1/organizations/{org_id}/remediations` (status filtresi: `pending_approval`, `validated`, `blocked`, `published`, `all`), `approve_patch` (`POST /remediations/{plan_id}/approve`) onay akışı ve `account.html` tablosu eklenerek onay bekleyen, doğrulanan, engellenen ve yayımlanan düzeltmeler ayrı kategoriler ve özet sayaçlarıyla tamamlandı.
-- [ ] VF-077: Kullanıcıların ayarlayabildiği e-posta/Slack/Teams bildirim entegrasyonları oluştur.
+- [x] VF-077: Kullanıcıların ayarlayabildiği e-posta/Slack/Teams bildirim entegrasyonları oluştur.
+  E-posta, Slack (Blocks API) ve Microsoft Teams (MessageCard) biçimlendiricileri, `NotificationDispatcher` gönderim motoru, `notification_channels` deposu ve REST endpoint'leri (`GET/POST /notifications/channels`, `PUT/DELETE /channels/{id}`, `POST /channels/{id}/test`) ile kullanıcı ayarlı bildirim kanalları tamamlandı.
 - [ ] VF-078: Bildirim dedup'u, toplulaştırma, kritik risk escalation'ı ve hassas içerik filtrelerini uygula.
 - [ ] VF-079: API'leri tutarlı v1 şeması, filtreler, cursor, hata kodu, request ID ve mutation idempotency ile tamamla.
 - [ ] VF-080: Mobil/erişilebilir kullanım, boş/hata/expired-session durumları ve gizlilik/bağlantı silme ayarlarını tamamla.
