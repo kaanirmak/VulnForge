@@ -729,6 +729,110 @@ class Store:
             ev = json.loads(row['evidence']) if isinstance(row['evidence'], str) else (row['evidence'] or {})
             return list(ev.get('_revisions', []))
 
+    def _ensure_unfixed_mitigations_table(self, c):
+        c.execute('''CREATE TABLE IF NOT EXISTS unfixed_mitigations (
+            repo TEXT NOT NULL,
+            advisory_id TEXT NOT NULL,
+            package TEXT NOT NULL,
+            ecosystem TEXT NOT NULL,
+            current_version TEXT NOT NULL,
+            mitigation_guidance TEXT NOT NULL,
+            owner TEXT,
+            priority TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            sla_deadline REAL NOT NULL,
+            recheck_interval_hours INTEGER NOT NULL DEFAULT 24,
+            next_recheck_at REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            history TEXT NOT NULL DEFAULT '[]',
+            PRIMARY KEY(repo, advisory_id)
+        )''')
+
+    def save_unfixed_mitigation(self, repo: str, advisory_id: str, package: str, ecosystem: str,
+                                current_version: str, mitigation_guidance: str, *,
+                                owner: str | None = None, priority: str = 'P2',
+                                sla_hours: int = 336, recheck_interval_hours: int = 24):
+        now = time.time()
+        sla_deadline = now + sla_hours * 3600
+        next_recheck = now + recheck_interval_hours * 3600
+        init_history = json.dumps([{'action': 'created', 'at': now, 'owner': owner, 'priority': priority}])
+        with self.transaction(), self.conn() as c:
+            self._ensure_unfixed_mitigations_table(c)
+            c.execute('''INSERT INTO unfixed_mitigations
+                (repo, advisory_id, package, ecosystem, current_version, mitigation_guidance, owner, priority,
+                 created_at, sla_deadline, recheck_interval_hours, next_recheck_at, status, history)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(repo, advisory_id) DO UPDATE SET
+                mitigation_guidance=excluded.mitigation_guidance,
+                owner=COALESCE(excluded.owner, unfixed_mitigations.owner),
+                priority=excluded.priority,
+                recheck_interval_hours=excluded.recheck_interval_hours''',
+                (repo, advisory_id, package, ecosystem, current_version, mitigation_guidance, owner,
+                 priority, now, sla_deadline, recheck_interval_hours, next_recheck, 'active', init_history))
+
+    def get_unfixed_mitigations(self, repo: str | None = None) -> list[dict]:
+        with self.conn() as c:
+            self._ensure_unfixed_mitigations_table(c)
+            if repo:
+                rows = c.execute('SELECT * FROM unfixed_mitigations WHERE repo=? ORDER BY priority ASC, sla_deadline ASC', (repo,)).fetchall()
+            else:
+                rows = c.execute('SELECT * FROM unfixed_mitigations ORDER BY priority ASC, sla_deadline ASC').fetchall()
+            out = []
+            now = time.time()
+            for r in rows:
+                item = dict(r)
+                item['history'] = json.loads(item['history']) if isinstance(item['history'], str) else []
+                if item['status'] == 'active':
+                    if now > item['sla_deadline']:
+                        item['sla_status'] = 'breached'
+                    elif now > (item['sla_deadline'] - 0.2 * (item['sla_deadline'] - item['created_at'])):
+                        item['sla_status'] = 'at_risk'
+                    else:
+                        item['sla_status'] = 'within_sla'
+                else:
+                    item['sla_status'] = item['status']
+                out.append(item)
+            return out
+
+    def extend_mitigation_sla(self, repo: str, advisory_id: str, additional_hours: int,
+                              *, reason: str, actor: str):
+        now = time.time()
+        with self.transaction(), self.conn() as c:
+            self._ensure_unfixed_mitigations_table(c)
+            row = c.execute('SELECT * FROM unfixed_mitigations WHERE repo=? AND advisory_id=?', (repo, advisory_id)).fetchone()
+            if not row:
+                raise ValueError('Mitigation entry not found')
+            new_deadline = row['sla_deadline'] + additional_hours * 3600
+            history = json.loads(row['history']) if isinstance(row['history'], str) else []
+            history.append({
+                'action': 'sla_extended',
+                'at': now,
+                'additional_hours': additional_hours,
+                'reason': reason,
+                'actor': actor
+            })
+            c.execute('UPDATE unfixed_mitigations SET sla_deadline=?, history=? WHERE repo=? AND advisory_id=?',
+                      (new_deadline, json.dumps(history, sort_keys=True), repo, advisory_id))
+
+    def record_mitigation_recheck(self, repo: str, advisory_id: str, *, status: str, result_summary: str):
+        now = time.time()
+        with self.transaction(), self.conn() as c:
+            self._ensure_unfixed_mitigations_table(c)
+            row = c.execute('SELECT * FROM unfixed_mitigations WHERE repo=? AND advisory_id=?', (repo, advisory_id)).fetchone()
+            if not row:
+                raise ValueError('Mitigation entry not found')
+            interval = row['recheck_interval_hours'] or 24
+            next_recheck = now + interval * 3600
+            history = json.loads(row['history']) if isinstance(row['history'], str) else []
+            history.append({
+                'action': 'rechecked',
+                'at': now,
+                'status': status,
+                'summary': result_summary
+            })
+            c.execute('UPDATE unfixed_mitigations SET next_recheck_at=?, status=?, history=? WHERE repo=? AND advisory_id=?',
+                      (next_recheck, status, json.dumps(history, sort_keys=True), repo, advisory_id))
+
     def pending_impact(self, repo, advisory_id, delivery):
         advisory=self.advisory(advisory_id)
         state='withdrawn' if advisory['withdrawn'] else 'under_investigation'

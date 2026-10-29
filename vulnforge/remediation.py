@@ -165,3 +165,55 @@ def build_patch_plans(repo: str, base_branch: str, baseline_sha: str, policy: di
         if plan is not None:
             plans.append(plan)
     return plans
+
+
+def build_unfixed_mitigation_plan(
+    repo: str,
+    dep: Dependency,
+    advisory: dict,
+    recommendation: dict,
+    *,
+    owner: str | None = None,
+    priority: str = 'P2',
+    recheck_interval_hours: int = 24
+) -> dict:
+    """Build an active mitigation and SLA tracking record for unfixed vulnerabilities."""
+    from .intelligence import advisory_identity
+    adv_id = advisory_identity(advisory)
+    guidance = (
+        f"No published fix currently exists for {dep.name}=={dep.version} ({adv_id}). "
+        f"Recommended mitigations: 1) Apply network/WAF filtering rules if applicable; "
+        f"2) Disable affected component via feature flag; "
+        f"3) Track upstream maintainer release issues; "
+        f"4) Audit usage for exploitable call paths."
+    )
+    sla_map = {'P0': 24, 'P1': 72, 'P2': 336, 'P3': 720}
+    sla_hours = sla_map.get(priority, 336)
+    return {
+        'repo': repo,
+        'advisory_id': adv_id,
+        'package': dep.name,
+        'ecosystem': dep.ecosystem,
+        'current_version': dep.version,
+        'mitigation_guidance': guidance,
+        'owner': owner,
+        'priority': priority,
+        'sla_hours': sla_hours,
+        'recheck_interval_hours': recheck_interval_hours,
+        'status': 'active'
+    }
+
+
+def evaluate_sla_status(plan: dict, now: float | None = None) -> str:
+    import time
+    t = time.time() if now is None else now
+    deadline = plan.get('sla_deadline', 0.0)
+    created = plan.get('created_at', 0.0)
+    if plan.get('status') != 'active':
+        return plan.get('status', 'resolved')
+    if t > deadline:
+        return 'breached'
+    total_window = max(1.0, deadline - created)
+    if t > (deadline - 0.2 * total_window):
+        return 'at_risk'
+    return 'within_sla'

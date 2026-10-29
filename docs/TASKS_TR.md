@@ -99,7 +99,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `enrich_recommendation_context` ile doğrudan/dolaylı paketler için parent paket tespiti, ekosisteme özel override stratejileri (npm overrides, pip constraints, cargo patch vb.) ve major sürüm kırılma riski uyarıları eklendi.
 - [x] VF-059: CVSS severity ile müdahale önceliğini ayır; KEV/EPSS, ortam ve exposure üzerinden açıklanabilir politika uygula.
   `evaluate_remediation_priority` ile teorik CVSS teknik şiddeti; gerçek CISA KEV sömürüsü, EPSS tahmin olasılığı ve runtime/dev/üretim ortamı exposure seviyeleriyle ayrıştırıldı; P0-P3 aksiyon sınıfları, SLA saatleri ve açıklanabilir gerekçe (`rationale`) modelleri tamamlandı.
-- [ ] VF-060: Düzeltme olmayan açıklar için mitigasyon, yeniden kontrol ve sahip/SLA takibi oluştur.
+- [x] VF-060: Düzeltme olmayan açıklar için mitigasyon, yeniden kontrol ve sahip/SLA takibi oluştur.
 
 ## G. Güvenli düzeltme ve PR — P1
 
