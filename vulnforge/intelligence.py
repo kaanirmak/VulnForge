@@ -1,6 +1,7 @@
 """Evidence-based upgrade suggestions; never installs or executes project code."""
 import re
 import time
+import httpx
 from packaging.version import InvalidVersion, Version
 
 from .dependencies import Dependency
@@ -85,7 +86,7 @@ def upgrade_class(dep, target):
     return 'major' if old[0] != new[0] else 'minor' if old[1] != new[1] else 'patch'
 
 
-async def recommend_updates(grouped: dict[Dependency, list[dict]], osv):
+async def recommend_updates(grouped: dict[Dependency, list[dict]], osv, *, registry_verifier=None):
     """Check targets against *all* current OSV advisories for the package.
 
     Advisory fix metadata is a candidate, not proof of a published release,
@@ -146,8 +147,39 @@ async def recommend_updates(grouped: dict[Dependency, list[dict]], osv):
                 output[dep].update(status='target_still_affected',note='Documented fix still has an OSV advisory; review another release.')
                 if not pending[dep]: pending.pop(dep)
                 continue
+            if registry_verifier is not None:
+                try:
+                    reg = await registry_verifier.verify_release(dep.name, target, dep.ecosystem)
+                except Exception:
+                    reg = {'published': False, 'error': True}
+                if not reg.get('published'):
+                    output[dep].update(status='release_not_published', release_verified=False,
+                                       note='Target release not published in package registry; review another candidate.')
+                    if not pending[dep]: pending.pop(dep)
+                    continue
+                if reg.get('yanked'):
+                    output[dep].update(status='release_yanked', release_verified=True, yanked=True,
+                                       yanked_reason=reg.get('yanked_reason'),
+                                       note='Target release has been yanked in package registry; review another candidate.')
+                    if not pending[dep]: pending.pop(dep)
+                    continue
+                if reg.get('deprecated'):
+                    output[dep].update(status='release_deprecated', release_verified=True, deprecated=True,
+                                       deprecation_reason=reg.get('deprecation_reason'),
+                                       note='Target release is deprecated in package registry; review another candidate.')
+                    if not pending[dep]: pending.pop(dep)
+                    continue
+                output[dep].update(status='update_available', recommended_version=target,
+                    release_verified=True, yanked=False, deprecated=False,
+                    upgrade_class=upgrade_class(dep,target), verified_at=time.time(),
+                    verification_source='OSV + package registry',
+                    note='Verified release published in package registry with no known advisory.')
+                pending.pop(dep)
+                continue
+
             output[dep].update(status='update_available',recommended_version=target,
                 upgrade_class=upgrade_class(dep,target),verified_at=time.time(),
+                release_verified=False, yanked=False, deprecated=False,
                 verification_source='OSV package/version query',
                 note='No known advisory returned by OSV for this target. Confirm release availability, regenerate lockfiles and run tests before upgrading.')
             pending.pop(dep)
@@ -352,3 +384,83 @@ class AdvisoryIngestionRunner:
                 catalog_scope=self.catalog_scope
             )
             raise
+
+
+class PackageRegistryVerifier:
+    """Verifies that recommended releases are published, not yanked, and not deprecated."""
+
+    def __init__(self, client: httpx.AsyncClient | None = None):
+        self.client = client
+        self.owns_client = client is None
+
+    async def close(self):
+        if self.owns_client and self.client:
+            await self.client.aclose()
+
+    async def verify_release(self, package: str, version: str, ecosystem: str) -> dict:
+        now = time.time()
+        client = self.client or httpx.AsyncClient(timeout=15, follow_redirects=True)
+        should_close = self.client is None
+        try:
+            if ecosystem == 'PyPI':
+                canonical = re.sub(r'[-_.]+', '-', package).lower()
+                resp = await client.get(f'https://pypi.org/pypi/{canonical}/json')
+                if resp.status_code == 404:
+                    return {'published': False, 'yanked': False, 'deprecated': False, 'verified_at': now}
+                resp.raise_for_status()
+                data = resp.json()
+                releases = data.get('releases', {})
+                if version not in releases:
+                    return {'published': False, 'yanked': False, 'deprecated': False, 'verified_at': now}
+                files = releases[version]
+                is_yanked = any(bool(f.get('yanked')) for f in files) if files else False
+                yank_reason = next((f.get('yanked_reason') for f in files if f.get('yanked')), None) if is_yanked else None
+                return {
+                    'published': True,
+                    'yanked': is_yanked,
+                    'yanked_reason': yank_reason,
+                    'deprecated': False,
+                    'deprecation_reason': None,
+                    'verified_at': now
+                }
+            elif ecosystem == 'npm':
+                resp = await client.get(f'https://registry.npmjs.org/{package}')
+                if resp.status_code == 404:
+                    return {'published': False, 'yanked': False, 'deprecated': False, 'verified_at': now}
+                resp.raise_for_status()
+                data = resp.json()
+                versions = data.get('versions', {})
+                if version not in versions:
+                    return {'published': False, 'yanked': False, 'deprecated': False, 'verified_at': now}
+                ver_info = versions[version]
+                is_deprecated = bool(ver_info.get('deprecated'))
+                dep_reason = ver_info.get('deprecated') if is_deprecated else None
+                return {
+                    'published': True,
+                    'yanked': False,
+                    'yanked_reason': None,
+                    'deprecated': is_deprecated,
+                    'deprecation_reason': dep_reason,
+                    'verified_at': now
+                }
+            elif ecosystem == 'crates.io':
+                headers = {'User-Agent': 'VulnForge-Package-Verifier (security@vulnforge.dev)'}
+                resp = await client.get(f'https://crates.io/api/v1/crates/{package}/{version}', headers=headers)
+                if resp.status_code == 404:
+                    return {'published': False, 'yanked': False, 'deprecated': False, 'verified_at': now}
+                resp.raise_for_status()
+                data = resp.json()
+                ver_info = data.get('version', {})
+                is_yanked = bool(ver_info.get('yanked'))
+                return {
+                    'published': True,
+                    'yanked': is_yanked,
+                    'yanked_reason': 'Yanked by crate owner' if is_yanked else None,
+                    'deprecated': False,
+                    'deprecation_reason': None,
+                    'verified_at': now
+                }
+            return {'published': True, 'yanked': False, 'deprecated': False, 'verified_at': now}
+        finally:
+            if should_close:
+                await client.aclose()

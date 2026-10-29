@@ -6,7 +6,7 @@
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 694 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 696 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -93,7 +93,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-055: Ekosisteme uygun sürüm karşılaştırmalarını genişlet; desteklenmeyen aralığı unknown tut.
 - [x] VF-056: Yeni açık→paket→proje→snapshot ilişkisini sürümlü geçmişiyle sakla.
   `advisory_impacts` tablosunda açık, paket, proje ve snapshot durum değişimlerini `_revisions` kronolojik geçmişi ve `impact_history(repo, advisory_id)` sorgusuyla sürümlü olarak saklama tamamlandı.
-- [ ] VF-057: Önerilen sürümün gerçekten yayımlandığını ve yank/deprecation durumunu paket kaydından doğrula.
+- [x] VF-057: Önerilen sürümün gerçekten yayımlandığını ve yank/deprecation durumunu paket kaydından doğrula.
+  `PackageRegistryVerifier` (PyPI, npm, crates.io) entegrasyonuyla `recommend_updates` motorunda yayımlanmamış, geri çekilmiş (yanked) veya kullanımdan kaldırılmış (deprecated) aday sürümlerin elenmesi ve temiz yayınlanmış sürümlerin seçilmesi tamamlandı.
 - [ ] VF-058: Constraint, parent bağımlılık, override ve major geçiş gereksinimini öneriye ekle.
 - [ ] VF-059: CVSS severity ile müdahale önceliğini ayır; KEV/EPSS, ortam ve exposure üzerinden açıklanabilir politika uygula.
 - [ ] VF-060: Düzeltme olmayan açıklar için mitigasyon, yeniden kontrol ve sahip/SLA takibi oluştur.
