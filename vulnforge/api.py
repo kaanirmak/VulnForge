@@ -220,13 +220,35 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
         if event=='installation_repositories':
             for item in data.get('repositories_removed',[]):
                 name=item.get('full_name','')
-                if NAME_RE.fullmatch(name): store.remove_repo(name)
+                if NAME_RE.fullmatch(name) and '..' not in name:
+                    store.remove_repo(name,reason='repository_removed_from_installation',installation_id=installation_id)
         if event=='installation' and action in ('deleted','suspend'):
-            store.remove_installation(installation_id)
+            reason='installation_deleted' if action=='deleted' else 'installation_suspended'
+            store.remove_installation(installation_id,reason=reason)
             for item in repos:
                 name=item.get('full_name','')
-                if NAME_RE.fullmatch(name): store.remove_repo(name)
+                if NAME_RE.fullmatch(name) and '..' not in name:
+                    store.remove_repo(name,reason=reason,installation_id=installation_id)
             return {'accepted':True,'queued':0}
+        if event=='installation' and action=='new_permissions_accepted':
+            extra_repos=[]
+            for item in repos:
+                name=item.get('full_name','')
+                if NAME_RE.fullmatch(name) and '..' not in name:
+                    store.upsert_repo(name,installation_id,item.get('default_branch') or 'main')
+                    extra_repos.append(name)
+            reconciled=store.reconcile_installation_permissions(
+                installation_id,installation.get('permissions') or {},
+                repos=extra_repos,metadata_only_required=(cfg.scan_mode=='customer_runner'))
+            queued=0
+            if cfg.source_access_allowed:
+                for name in reconciled:
+                    queued+=store.enqueue('dependency_audit',name,{},f'perm:{delivery}:{name}')
+            return {'accepted':True,'queued':queued,'reconciled_repositories':len(reconciled)}
+        if event=='installation' and action=='unsuspend' and not repos:
+            with store.conn() as c:
+                repos=[{'full_name':r['full_name'],'default_branch':r['default_branch']}
+                       for r in c.execute('SELECT full_name,default_branch FROM repositories WHERE installation_id=?',(installation_id,))]
         queued=0
         for item in repos:
             name=item.get('full_name','')
@@ -234,6 +256,15 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
                 continue
             branch=item.get('default_branch') or 'main'
             store.upsert_repo(name,installation_id,branch)
+            if event=='installation' and action in ('created','unsuspend'):
+                store.invalidate_repository_evidence(name)
+                store.audit_event(name,None,'github_webhook',
+                                  'installation_created' if action=='created' else 'installation_unsuspended',
+                                  {'installation_id':installation_id,'default_branch':branch})
+            elif event=='installation_repositories' and action=='added':
+                store.invalidate_repository_evidence(name)
+                store.audit_event(name,None,'github_webhook','repository_added_to_installation',
+                                  {'installation_id':installation_id,'default_branch':branch})
             if event=='push' and data.get('ref','').startswith('refs/heads/'):
                 deleted=bool(data.get('deleted',False)) or data.get('after')=='0'*40
                 if deleted:
@@ -276,7 +307,7 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
                 queued+=store.enqueue('push',name,payload,f'push:{delivery}:{name}')
             elif event=='dependabot_alert' and action in ('created','reopened','reintroduced','fixed','dismissed'):
                 queued+=store.enqueue('dependency_audit',name,{},f'alert:{delivery}:{name}')
-            elif event in ('installation','installation_repositories') and action in ('created','added'):
+            elif event in ('installation','installation_repositories') and action in ('created','added','unsuspend'):
                 queued+=store.enqueue('dependency_audit',name,{},f'install:{delivery}:{name}')
         return {'accepted':True,'queued':queued}
 

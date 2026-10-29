@@ -184,24 +184,57 @@ class Store:
         with self.conn() as c:
             c.execute('UPDATE scans SET commit_sha=? WHERE id=?',(sha,scan_id))
 
-    def remove_repo(self, name: str):
+    def remove_repo(self, name: str, *, reason: str | None = None, actor: str = 'github_webhook',
+                    installation_id: int | None = None):
         # Clean security metadata when a GitHub App is uninstalled from a repo.
         with self.conn() as c:
             own = self._active.get() is None
             if own: self.begin(c)
+            owner = c.execute('SELECT organization_id FROM repository_ownership WHERE repo=?', (name,)).fetchone() if reason else None
             c.execute('DELETE FROM suppressions WHERE finding_id IN (SELECT id FROM findings WHERE repo=?)', (name,))
             c.execute('DELETE FROM scan_findings WHERE scan_id IN (SELECT id FROM scans WHERE repo=?)', (name,))
+            c.execute('DELETE FROM runner_token_uses WHERE receipt_id IN (SELECT id FROM runner_receipts WHERE repo=?)', (name,))
             for table in ('repositories','dependency_inventory'):
                 c.execute(f"DELETE FROM {table} WHERE {'full_name' if table=='repositories' else 'repo'}=?",(name,))
-            for table in ('jobs','findings','remediations','scans','audit_events','advisory_impacts','runner_reports'):
+            for table in ('jobs','findings','remediations','scans','audit_events','advisory_impacts','runner_reports',
+                          'remediation_policies','runner_policies','runner_receipts','repository_ownership'):
                 c.execute(f"DELETE FROM {table} WHERE repo=?",(name,))
+            if owner and reason:
+                details={'repo':name,'reason':reason}
+                if installation_id is not None: details['installation_id']=installation_id
+                c.execute('INSERT INTO audit_events(repo,finding_id,actor,action,details,created_at) VALUES(?,?,?,?,?,?)',
+                          ('organization:'+owner['organization_id'],None,actor,reason,json.dumps(details),time.time()))
             if own: c.execute('COMMIT')
 
-    def remove_installation(self, installation_id):
+    def remove_installation(self, installation_id, *, reason: str | None = None, actor: str = 'github_webhook'):
         with self.conn() as c:
             names = c.execute('SELECT full_name FROM repositories WHERE installation_id=?', (installation_id,)).fetchall()
         for row in names:
-            self.remove_repo(row['full_name'])
+            self.remove_repo(row['full_name'], reason=reason, actor=actor, installation_id=installation_id)
+
+    def reconcile_installation_permissions(self, installation_id: int, permissions: dict, *,
+                                           repos: list[str] | None = None, metadata_only_required: bool = True) -> list[str]:
+        clean={str(k):str(v) for k,v in (permissions.items() if isinstance(permissions,dict) else ())
+               if isinstance(k,str) and isinstance(v,str) and len(k)<=64 and len(v)<=32}
+        exceeds_metadata_only=(clean!={'metadata':'read'})
+        now=time.time()
+        with self.transaction(), self.conn() as c:
+            rows=c.execute('SELECT full_name FROM repositories WHERE installation_id=?',(installation_id,)).fetchall()
+            targets=sorted({r['full_name'] for r in rows}|set(repos or ()))
+            reconciled=[]
+            for name in targets:
+                if c.execute('SELECT 1 FROM repositories WHERE full_name=? AND installation_id=?',
+                             (name,installation_id)).fetchone() is None:
+                    continue
+                c.execute('UPDATE repositories SET evidence_invalidated_at=?,updated_at=? WHERE full_name=?',(now,now,name))
+                if metadata_only_required and exceeds_metadata_only:
+                    c.execute('UPDATE runner_policies SET enabled=0 WHERE repo=?',(name,))
+                self.audit_event(name,None,'github_webhook','installation_permissions_changed',
+                    {'installation_id':installation_id,'permissions':clean,
+                     'exceeds_metadata_only':exceeds_metadata_only,
+                     'runner_policy_disabled':bool(metadata_only_required and exceeds_metadata_only)})
+                reconciled.append(name)
+            return reconciled
 
     def add_delivery(self, delivery_id: str) -> bool:
         with self.conn() as c:
