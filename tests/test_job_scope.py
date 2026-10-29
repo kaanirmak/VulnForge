@@ -232,6 +232,54 @@ def test_private_catalog_queue_is_blocked_until_namespaced(tmp_path):
     assert not store.list_rows('scans')
 
 
+def test_private_osv_catalog_is_namespaced_per_organization_and_isolated(queue):
+    ids=Identities(queue)
+    alpha_owner=ids.record_github_user(100,'alpha-owner')
+    bravo_owner=ids.record_github_user(200,'bravo-owner')
+    alpha_org=ids.create_organization(alpha_owner['id'],'Alpha')['id']
+    bravo_org=ids.create_organization(bravo_owner['id'],'Bravo')['id']
+    ids.record_repository_ownership(alpha_org,'alpha/project',alpha_owner['id'],'fixture-alpha')
+    ids.record_repository_ownership(bravo_org,'bravo/project',bravo_owner['id'],'fixture-bravo')
+    cfg=managed_config(intelligence_mode='private_osv',osv_api_url='https://osv.internal.example')
+    agent=Agent(cfg,queue,FakeGitHub(),FakeOSV())
+    alpha_job=claim(queue,'alpha/project','alpha-audit')
+    asyncio.run(agent.process(alpha_job))
+    queue.finish(alpha_job)
+    with queue.conn() as c:
+        adv=c.execute('SELECT id,source,catalog_scope FROM advisories').fetchone()
+        assert adv['id']==f'org:{alpha_org}:GHSA-TEST'
+        assert adv['source']=='Private OSV' and adv['catalog_scope']==f'org:{alpha_org}'
+    assert not queue.list_advisories()
+    assert len(queue.list_advisories(organization_id=alpha_org))==1
+    assert not queue.list_advisories(organization_id=bravo_org)
+    if queue.backend=='sqlite':
+        from vulnforge.organization import OrganizationData
+        alpha_view=OrganizationData(queue,alpha_org,alpha_owner['id'])
+        bravo_view=OrganizationData(queue,bravo_org,bravo_owner['id'])
+        assert len(alpha_view.advisories())==1
+        assert not bravo_view.advisories()
+
+
+def test_legacy_non_public_advisories_are_quarantined_on_upgrade(tmp_path):
+    import sqlite3
+    from vulnforge.db import SCHEMA
+    path=tmp_path/'legacy_advisories.db'
+    with sqlite3.connect(path) as c:
+        c.executescript(SCHEMA)
+        now=time.time()
+        c.execute('''INSERT INTO advisories(id,aliases,summary,source,data,source_sha256,withdrawn,first_seen_at,updated_at)
+                     VALUES(?,?,?,?,?,?,?,?,?)''',
+                  ('PRIV-LEGACY-1','[]','Legacy unnamespaced entry','Custom Feed','{}','0'*64,0,now,now))
+        c.execute('INSERT INTO advisory_aliases(alias,advisory_id) VALUES(?,?)',
+                  ('CVE-2099-99999','PRIV-LEGACY-1'))
+    store=Store(str(path))
+    with store.conn() as c:
+        assert c.execute("SELECT catalog_scope FROM advisories WHERE id='PRIV-LEGACY-1'").fetchone()[0]=='quarantined_legacy'
+        assert c.execute("SELECT catalog_scope FROM advisory_aliases WHERE alias='CVE-2099-99999'").fetchone()[0]=='quarantined_legacy'
+    assert not store.list_advisories()
+    assert store.advisory('PRIV-LEGACY-1') is None
+
+
 def test_new_installation_cannot_inherit_old_owner_or_private_results(queue):
     own(queue)
     job=claim(queue)

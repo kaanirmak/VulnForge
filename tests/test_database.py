@@ -37,7 +37,7 @@ def test_existing_sqlite_schema_is_upgraded_without_deleting_records(tmp_path):
                   ('fixture/repo',1,'main',time.time()))
     upgraded=Store(str(path))
     assert upgraded.list_rows('repositories')[0]['full_name']=='fixture/repo'
-    with upgraded.conn() as c: assert c.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0]==10
+    with upgraded.conn() as c: assert c.execute('SELECT COUNT(*) FROM schema_migrations').fetchone()[0]==12
 
 
 def test_applied_migration_drift_is_rejected(tmp_path):
@@ -102,6 +102,23 @@ def pg_operator(pg_store):
         with pg_store.transaction(),pg_store.conn() as c: provision_operator(c,role)
         url=urlsplit(pg_store.path)._replace(netloc=role+'@').geturl()
         yield Store(url,migrate=False)
+    finally:
+        with pg_store.conn() as c:
+            c.execute('DELETE FROM vf_security.runtime_roles WHERE role_name=?',(role,))
+            c.execute(f'DROP OWNED BY {identifier(role)} CASCADE')
+            c.execute(f'DROP ROLE {identifier(role)}')
+
+
+@pytest.fixture
+def pg_worker(pg_store):
+    from vulnforge.rls import WorkerStore,provision_worker,identifier
+    role='vf_worker_'+uuid.uuid4().hex
+    with pg_store.conn() as c:
+        c.execute(f'CREATE ROLE {identifier(role)} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS')
+    try:
+        with pg_store.transaction(),pg_store.conn() as c: provision_worker(c,role)
+        url=urlsplit(pg_store.path)._replace(netloc=role+'@').geturl()
+        yield WorkerStore(url)
     finally:
         with pg_store.conn() as c:
             c.execute('DELETE FROM vf_security.runtime_roles WHERE role_name=?',(role,))

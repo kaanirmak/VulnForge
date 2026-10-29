@@ -10,7 +10,7 @@ import os
 import re
 
 from .database import DatabaseError,verify_migrations
-from .db import Store
+from .db import Store,StaleJob
 
 READ_TABLES=('organizations','memberships','repository_ownership','repositories','findings','dependency_inventory',
              'remediations','scans','scan_findings','advisory_impacts','advisories','advisory_aliases','suppressions','audit_events')
@@ -19,6 +19,14 @@ PRIVATE_TABLES=('users','jobs','deliveries','runner_reports','auth_states','user
 SEQUENCES=('jobs_id_seq','findings_id_seq','remediations_id_seq','audit_events_id_seq','advisory_impacts_id_seq')
 INSERT_COLUMNS={'suppressions':{'finding_id','reason','expires_at'},
                 'audit_events':{'repo','finding_id','actor','action','details','created_at'}}
+WORKER_SELECT_TABLES=('repositories','repository_ownership','remediation_policies','memberships','jobs','findings',
+                      'suppressions','dependency_inventory','scans','scan_findings','advisory_impacts','advisories','advisory_aliases','remediations')
+WORKER_INSERT_TABLES=('jobs','findings','dependency_inventory','scans','scan_findings','advisory_impacts','advisories','advisory_aliases','remediations')
+WORKER_UPDATE_TABLES=('findings','dependency_inventory','scans','scan_findings','advisory_impacts','advisories','advisory_aliases')
+WORKER_DELETE_TABLES=('dependency_inventory',)
+WORKER_COLUMN_INSERTS={'audit_events':{'repo','finding_id','actor','action','details','created_at'}}
+WORKER_COLUMN_UPDATES={'repositories':{'default_branch','evidence_invalidated_at','updated_at'},
+                       'jobs':{'lease_until'}}
 
 
 def identifier(value):
@@ -145,8 +153,80 @@ def verify_operator(store):
         oid=c.execute('SELECT oid FROM pg_catalog.pg_roles WHERE rolname=?',(row['session'],)).fetchone()[0]
         validate_no_creation(c,oid)
         validate_operator_grants(c,oid)
-        if not c.execute('SELECT vf_security.is_internal() AND NOT vf_security.is_customer()').fetchone()[0]:
+        if not c.execute('SELECT vf_security.is_internal() AND NOT vf_security.is_customer() AND NOT vf_security.is_worker()').fetchone()[0]:
             raise DatabaseError('Operator runtime role must be separately registered')
+
+
+def validate_worker(c,role,complete=True):
+    validate_role(c,role,complete=False)
+    oid=c.execute('SELECT oid FROM pg_catalog.pg_roles WHERE rolname=?',(role,)).fetchone()[0]
+    if not complete: return
+    validate_no_creation(c,oid)
+    rows=c.execute("""SELECT x.oid,n.nspname,x.relname,x.relkind FROM pg_catalog.pg_class x
+        JOIN pg_catalog.pg_namespace n ON n.oid=x.relnamespace
+        WHERE pg_catalog.left(n.nspname,3)<>'pg_' AND n.nspname<>'information_schema'
+        AND x.relkind IN ('r','p','v','m','f','S')""").fetchall()
+    for obj in rows:
+        table=obj['relname'];public=obj['nspname']=='public'
+        if obj['relkind']=='S':
+            for permission in ('USAGE','SELECT','UPDATE'):
+                allowed=public and table in SEQUENCES and permission=='USAGE'
+                actual=c.execute('SELECT pg_catalog.has_sequence_privilege(?,?,?)',(oid,obj['oid'],permission)).fetchone()[0]
+                if actual!=allowed: raise DatabaseError('Worker role has an unexpected sequence grant')
+            continue
+        for permission in ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER'):
+            allowed=public and ((permission=='SELECT' and table in WORKER_SELECT_TABLES) or
+                                (permission=='INSERT' and table in WORKER_INSERT_TABLES) or
+                                (permission=='UPDATE' and table in WORKER_UPDATE_TABLES) or
+                                (permission=='DELETE' and table in WORKER_DELETE_TABLES))
+            actual=c.execute('SELECT pg_catalog.has_table_privilege(?,?,?)',(oid,obj['oid'],permission)).fetchone()[0]
+            if actual!=allowed: raise DatabaseError('Worker role has an unexpected table grant')
+        columns=c.execute('SELECT attname,attnum FROM pg_catalog.pg_attribute WHERE attrelid=? AND attnum>0 AND NOT attisdropped',(obj['oid'],)).fetchall()
+        for column in columns:
+            for permission in ('SELECT','INSERT','UPDATE','REFERENCES'):
+                allowed=public and ((permission=='SELECT' and table in WORKER_SELECT_TABLES) or
+                                    (permission=='INSERT' and (table in WORKER_INSERT_TABLES or column['attname'] in WORKER_COLUMN_INSERTS.get(table,set()))) or
+                                    (permission=='UPDATE' and (table in WORKER_UPDATE_TABLES or column['attname'] in WORKER_COLUMN_UPDATES.get(table,set()))))
+                actual=c.execute('SELECT pg_catalog.has_column_privilege(?,?,?,?)',(oid,obj['oid'],column['attnum'],permission)).fetchone()[0]
+                if actual!=allowed: raise DatabaseError('Worker role has an unexpected column grant')
+    if c.execute("""SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace
+        WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog','information_schema','vf_security')
+        AND pg_catalog.has_function_privilege(?,p.oid,'EXECUTE')""",(oid,)).fetchone():
+        raise DatabaseError('Worker role can call an unreviewed privileged function')
+
+
+def provision_worker(c,role):
+    quoted=identifier(role)
+    validate_worker(c,role,complete=False)
+    existing=c.execute('SELECT mode FROM vf_security.runtime_roles WHERE role_name=?',(role,)).fetchone()
+    if existing and existing['mode']!='worker': raise DatabaseError('Runtime role mode cannot be converted')
+    dbname=c.execute('SELECT pg_catalog.current_database()').fetchone()[0]
+    dbquote='"'+dbname.replace('"','""')+'"'
+    c.execute(f'REVOKE TEMPORARY ON DATABASE {dbquote} FROM PUBLIC')
+    c.execute(f'REVOKE CREATE,TEMPORARY ON DATABASE {dbquote} FROM {quoted}')
+    c.execute(f'REVOKE ALL ON SCHEMA public,vf_security FROM {quoted}')
+    c.execute(f'GRANT CONNECT ON DATABASE {dbquote} TO {quoted}')
+    c.execute(f'GRANT USAGE ON SCHEMA public,vf_security TO {quoted}')
+    for table in set(READ_TABLES)|set(PRIVATE_TABLES):
+        c.execute(f'REVOKE ALL ON public.{table} FROM {quoted}')
+        columns=c.execute("SELECT attname FROM pg_catalog.pg_attribute WHERE attrelid=?::regclass AND attnum>0 AND NOT attisdropped",('public.'+table,)).fetchall()
+        names=','.join('"'+row['attname']+'"' for row in columns)
+        c.execute(f'REVOKE INSERT({names}),UPDATE({names}),REFERENCES({names}),SELECT({names}) ON public.{table} FROM {quoted}')
+    for sequence in SEQUENCES:
+        c.execute(f'REVOKE ALL ON public.{sequence} FROM PUBLIC')
+        c.execute(f'REVOKE ALL ON public.{sequence} FROM {quoted}')
+    c.execute('GRANT SELECT ON '+','.join('public.'+table for table in WORKER_SELECT_TABLES)+f' TO {quoted}')
+    c.execute('GRANT INSERT ON '+','.join('public.'+table for table in WORKER_INSERT_TABLES)+f' TO {quoted}')
+    c.execute('GRANT UPDATE ON '+','.join('public.'+table for table in WORKER_UPDATE_TABLES)+f' TO {quoted}')
+    c.execute('GRANT DELETE ON '+','.join('public.'+table for table in WORKER_DELETE_TABLES)+f' TO {quoted}')
+    for table,columns in WORKER_COLUMN_INSERTS.items():
+        c.execute(f'GRANT INSERT('+','.join(sorted(columns))+f') ON public.{table} TO {quoted}')
+    for table,columns in WORKER_COLUMN_UPDATES.items():
+        c.execute(f'GRANT UPDATE('+','.join(sorted(columns))+f') ON public.{table} TO {quoted}')
+    c.execute('GRANT USAGE ON SEQUENCE '+','.join('public.'+name for name in SEQUENCES)+f' TO {quoted}')
+    c.execute(f'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA vf_security TO {quoted}')
+    c.execute("INSERT INTO vf_security.runtime_roles VALUES(?,'worker') ON CONFLICT(role_name) DO NOTHING",(role,))
+    validate_worker(c,role)
 
 
 def validate_operator_grants(c,oid):
@@ -176,7 +256,7 @@ class CustomerStore(Store):
             row=c.execute('SELECT current_user AS current,session_user AS session').fetchone()
             if row['current']!=row['session']: raise DatabaseError('Customer connection must use its own login')
             validate_role(c,row['session'])
-            if not c.execute('SELECT vf_security.is_customer() AND NOT vf_security.is_internal()').fetchone()[0]:
+            if not c.execute('SELECT vf_security.is_customer() AND NOT vf_security.is_internal() AND NOT vf_security.is_worker()').fetchone()[0]:
                 raise DatabaseError('Customer database role is not registered')
             if c.execute("SELECT pg_catalog.current_setting('row_security')").fetchone()[0]!='on':
                 raise DatabaseError('Customer row security must be enabled')
@@ -198,11 +278,45 @@ class CustomerStore(Store):
             yield
 
 
+class WorkerStore(Store):
+    def __init__(self,path):
+        self._job=ContextVar('worker_store_job',default=None)
+        if not path.startswith(('postgresql://','postgres://')): raise DatabaseError('Worker RLS requires PostgreSQL')
+        self.path=path;self.backend='postgresql';self._active=ContextVar('worker_transaction',default=None)
+        with self.conn() as c:
+            row=c.execute('SELECT current_user AS current,session_user AS session').fetchone()
+            if row['current']!=row['session']: raise DatabaseError('Worker connection must use its own login')
+            validate_worker(c,row['session'])
+            if not c.execute('SELECT vf_security.is_worker() AND NOT vf_security.is_internal() AND NOT vf_security.is_customer()').fetchone()[0]:
+                raise DatabaseError('Worker database role is not registered')
+            if c.execute("SELECT pg_catalog.current_setting('row_security')").fetchone()[0]!='on':
+                raise DatabaseError('Worker row security must be enabled')
+            rows=c.execute("SELECT relname,relrowsecurity,relforcerowsecurity FROM pg_catalog.pg_class WHERE relnamespace='public'::regnamespace").fetchall()
+            enabled={row['relname'] for row in rows if row['relrowsecurity'] and row['relforcerowsecurity']}
+            if not set(RLS_TABLES)<=enabled: raise DatabaseError('Required row security policy is missing')
+            verify_migrations(c,'postgresql',security=True)
+
+    def _apply_job_context(self,c,job):
+        if (type(job.get('id')) is not int or job['id']<1 or
+            not isinstance(job.get('claim_token'),str) or not re.fullmatch(r'[a-f0-9]{32}',job['claim_token']) or
+            not isinstance(job.get('connection_id'),str) or not job['connection_id']):
+            raise StaleJob('Job authorization expired')
+        mode=job.get('catalog_scope_mode','public')
+        if mode not in ('public','private_osv'):
+            raise StaleJob('Job authorization expired')
+        c.execute("SELECT pg_catalog.set_config('vulnforge.job_id',?,true)",(str(job['id']),))
+        c.execute("SELECT pg_catalog.set_config('vulnforge.claim_token',?,true)",(job['claim_token'],))
+        c.execute("SELECT pg_catalog.set_config('vulnforge.connection_id',?,true)",(job['connection_id'],))
+        c.execute("SELECT pg_catalog.set_config('vulnforge.organization_id',?,true)",(job.get('organization_id') or '',))
+        c.execute("SELECT pg_catalog.set_config('vulnforge.catalog_scope',?,true)",(mode,))
+
+
 def main():
     parser=argparse.ArgumentParser(description='Provision an existing runtime DB login; dedicated database only')
     group=parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--customer-role')
     group.add_argument('--operator-role')
+    group.add_argument('--worker-role')
     args=parser.parse_args()
     try:
         url=os.getenv('DATABASE_URL','')
@@ -210,7 +324,8 @@ def main():
         store=Store(url)
         with store.transaction(),store.conn() as c:
             if args.customer_role: provision_customer(c,args.customer_role)
-            else: provision_operator(c,args.operator_role)
+            elif args.operator_role: provision_operator(c,args.operator_role)
+            else: provision_worker(c,args.worker_role)
     except (DatabaseError,ValueError):
         parser.exit(2,'Runtime role provisioning failed; credentials and server details are not printed. Check the RLS runbook.\n')
     print('Runtime database role provisioned; no customer access was enabled.')

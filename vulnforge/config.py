@@ -19,6 +19,7 @@ class Config:
     database_path: str = "./data/vulnforge.db"
     database_url: str = field(default='',repr=False)
     customer_database_url: str = field(default='',repr=False)
+    worker_database_url: str = field(default='',repr=False)
     database_auto_migrate: bool = True
     enable_auto_pr: bool = False
     enable_kev: bool = False
@@ -57,9 +58,12 @@ class Config:
             raise ValueError('Named operator credentials replace the legacy admin token')
         if self.operator_report_token and self.operator_report_token in tokens:
             raise ValueError('Report intake requires an independent credential')
-        for url in (self.database_url,self.customer_database_url):
+        for url in (self.database_url,self.customer_database_url,self.worker_database_url):
             if url and not url.startswith(('postgresql://','postgres://')):
                 raise ValueError('Database URL must use a PostgreSQL connection URI')
+        configured_urls=[url for url in (self.database_url,self.customer_database_url,self.worker_database_url) if url]
+        if len(configured_urls)!=len(set(configured_urls)):
+            raise ValueError('Operator, customer and worker database URLs must use distinct roles')
         for value in (self.allow_managed_source_access,self.allow_external_package_metadata,
                       self.enable_auto_pr,self.enable_checks,self.enable_kev,self.allow_insecure_local_auth,self.customer_api_preview,self.database_auto_migrate,self.runner_oidc_preview,self.github_connection_preview):
             if type(value) is not bool: raise ValueError('Consent and feature flags must be booleans')
@@ -148,6 +152,7 @@ class Config:
             database_path=getenv("DATABASE_PATH", "./data/vulnforge.db"),
             database_url=getenv('DATABASE_URL',''),
             customer_database_url=getenv('CUSTOMER_DATABASE_URL',''),
+            worker_database_url=getenv('WORKER_DATABASE_URL',''),
             database_auto_migrate=getenv('DATABASE_AUTO_MIGRATE','true').lower()=='true',
             enable_auto_pr=getenv("ENABLE_AUTO_PR", "false").lower() == "true",
             enable_kev=getenv("ENABLE_KEV", "false").lower() == "true",

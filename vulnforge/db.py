@@ -39,6 +39,7 @@ class Store:
             # local operation locks and revalidates the live connection/lease.
             if self._job.get() is not None:
                 self.begin(c)
+                self._apply_job_context(c,self._job.get())
                 self._check_job(c,self._job.get(),lock=True)
                 token=self._active.set(c)
                 try:
@@ -56,6 +57,9 @@ class Store:
 
     def begin(self,c):
         c.execute('BEGIN' if self.backend=='postgresql' else 'BEGIN IMMEDIATE')
+
+    def _apply_job_context(self,c,job):
+        pass
 
     def _check_job(self,c,job,*,lock=False):
         row=c.execute('SELECT * FROM repositories WHERE full_name=?'+
@@ -78,14 +82,28 @@ class Store:
             raise StaleJob('Job authorization expired')
 
     def check_job(self,job):
+        active_job=self._job.get()
+        if active_job is not None and (active_job.get('id')!=job.get('id') or active_job.get('claim_token')!=job.get('claim_token')):
+            raise StaleJob('Job authorization expired')
         with self.transaction(), self.conn() as c:
+            if active_job is None:
+                self._apply_job_context(c,job)
             self._check_job(c,job,lock=True)
 
     @contextmanager
-    def job_scope(self,job):
+    def job_scope(self,job,*,catalog_scope='public'):
         if self._job.get() is not None or self._active.get() is not None:
             raise RuntimeError('Job scopes cannot be nested')
+        if catalog_scope not in ('public','private_osv'):
+            raise ValueError('Invalid job catalog scope')
         snapshot=dict(job)
+        snapshot['catalog_scope_mode']=catalog_scope
+        if catalog_scope=='private_osv':
+            if not snapshot.get('organization_id'):
+                raise StaleJob('Private catalog requires an organization-scoped job')
+            snapshot['catalog_scope']='org:'+snapshot['organization_id']
+        else:
+            snapshot['catalog_scope']='public'
         self.check_job(snapshot)
         token=self._job.set(snapshot)
         try:
@@ -118,6 +136,16 @@ class Store:
     def upsert_repo(self, name: str, installation_id: int, default_branch: str):
         now = time.time()
         with self.transaction(), self.conn() as c:
+            if self._job.get() is not None:
+                job=self._job.get()
+                if name!=job['repo'] or installation_id!=job['installation_id']:
+                    raise PermissionError('Installation outside job scope')
+                c.execute("""UPDATE repositories SET
+                    evidence_invalidated_at=CASE WHEN default_branch<>? THEN ? ELSE evidence_invalidated_at END,
+                    default_branch=?,updated_at=?
+                    WHERE full_name=? AND installation_id=? AND connection_id=?""",
+                    (default_branch,now,default_branch,now,name,installation_id,job['connection_id']))
+                return
             # Materialize before locking so concurrent first registrations also
             # serialize; an upsert must not overwrite an unseen installation.
             c.execute('''INSERT INTO repositories(full_name,installation_id,default_branch,updated_at,connection_id)
@@ -250,7 +278,12 @@ class Store:
                 (time.time(),job['id'],job['claim_token']))
 
     def renew_job(self,job):
+        active_job=self._job.get()
+        if active_job is not None and (active_job.get('id')!=job.get('id') or active_job.get('claim_token')!=job.get('claim_token')):
+            raise StaleJob('Job authorization expired')
         with self.transaction(),self.conn() as c:
+            if active_job is None:
+                self._apply_job_context(c,job)
             self._check_job(c,job,lock=True)
             c.execute('UPDATE jobs SET lease_until=? WHERE id=? AND claim_token=?',
                       (time.time()+300,job['id'],job['claim_token']))
@@ -291,9 +324,11 @@ class Store:
             c.execute("""INSERT INTO findings(repo,key,category,severity,title,file_path,commit_sha,details,detected_at)
             VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(repo,key) DO UPDATE SET
             severity=excluded.severity,title=excluded.title,details=excluded.details,
-            status=CASE WHEN findings.status='suppressed' AND EXISTS (
+            status=CASE WHEN findings.status IN ('suppressed','risk_accepted') AND EXISTS (
                 SELECT 1 FROM suppressions WHERE finding_id=findings.id AND expires_at>?
-            ) THEN 'suppressed' ELSE 'open' END,
+            ) THEN findings.status
+            WHEN findings.status='false_positive' THEN 'false_positive'
+            ELSE 'open' END,
             commit_sha=excluded.commit_sha,detected_at=excluded.detected_at""",
             (repo,key,category,severity,title,file_path,commit_sha,json.dumps(details),time.time(),time.time()))
             current=c.execute('SELECT id,status,severity FROM findings WHERE repo=? AND key=?',(repo,key)).fetchone()
@@ -354,16 +389,34 @@ class Store:
             matching.update(r['full_name'] for r in rows)
         return matching
 
-    def save_advisory(self, advisory, source='OSV'):
+    def _catalog_scope(self, catalog_scope=None):
+        if catalog_scope is not None: return catalog_scope
+        job=self._job.get()
+        if job is not None: return job.get('catalog_scope','public')
+        return 'public'
+
+    @staticmethod
+    def _scoped_advisory_id(advisory_id: str, scope: str) -> str:
+        if scope=='public': return advisory_id
+        prefix=scope+':'
+        return advisory_id if advisory_id.startswith(prefix) else prefix+advisory_id
+
+    def save_advisory(self, advisory, source='OSV', *, catalog_scope=None):
         import hashlib
         from datetime import datetime
         from .intelligence import advisory_identity
-        canonical=advisory_identity(advisory)
-        aliases=sorted({canonical,advisory['id'],*advisory.get('aliases',[])})
+        scope=self._catalog_scope(catalog_scope)
+        if scope!='public' and not scope.startswith('org:'):
+            raise ValueError('Invalid advisory catalog scope')
+        if scope.startswith('org:') and source=='OSV':
+            source='Private OSV'
+        raw_canonical=advisory_identity(advisory)
+        canonical=self._scoped_advisory_id(raw_canonical,scope)
+        aliases=sorted({raw_canonical,advisory['id'],*advisory.get('aliases',[])})
         encoded=json.dumps(advisory,sort_keys=True)
         now=time.time()
         with self.transaction(), self.conn() as c:
-            previous=c.execute('SELECT * FROM advisories WHERE id=?',(canonical,)).fetchone()
+            previous=c.execute('SELECT * FROM advisories WHERE id=? AND catalog_scope=?',(canonical,scope)).fetchone()
             withdrawn=bool(advisory.get('withdrawn'))
             if previous:
                 aliases=sorted(set(aliases)|set(json.loads(previous['aliases'])))
@@ -379,33 +432,37 @@ class Store:
                          (source=='GitHub webhook' and old and new>old))
                 preserve=previous['source']=='GitHub webhook' and source=='OSV' and new<=old
                 if stale or blocked or preserve:
-                    c.execute('UPDATE advisories SET aliases=? WHERE id=?',(json.dumps(aliases),canonical))
+                    c.execute('UPDATE advisories SET aliases=? WHERE id=? AND catalog_scope=?',(json.dumps(aliases),canonical,scope))
                     for alias in aliases:
-                        c.execute('INSERT INTO advisory_aliases VALUES(?,?) ON CONFLICT DO NOTHING',(alias,canonical))
+                        c.execute('INSERT INTO advisory_aliases(alias,advisory_id,catalog_scope) VALUES(?,?,?) ON CONFLICT DO NOTHING',(alias,canonical,scope))
                     return canonical
-            c.execute('''INSERT INTO advisories VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
+            c.execute('''INSERT INTO advisories(id,aliases,summary,source,data,source_sha256,withdrawn,first_seen_at,updated_at,catalog_scope)
+                VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
                 aliases=excluded.aliases,summary=excluded.summary,source=excluded.source,data=excluded.data,
-                source_sha256=excluded.source_sha256,withdrawn=excluded.withdrawn,updated_at=excluded.updated_at''',
+                source_sha256=excluded.source_sha256,withdrawn=excluded.withdrawn,updated_at=excluded.updated_at
+                WHERE advisories.catalog_scope=excluded.catalog_scope''',
                 (canonical,json.dumps(aliases),str(advisory.get('summary',''))[:1000],source,encoded,
-                 hashlib.sha256(encoded.encode()).hexdigest(),int(withdrawn),now,now))
+                 hashlib.sha256(encoded.encode()).hexdigest(),int(withdrawn),now,now,scope))
             for alias in aliases:
-                c.execute('INSERT INTO advisory_aliases VALUES(?,?) ON CONFLICT DO NOTHING',(alias,canonical))
+                c.execute('INSERT INTO advisory_aliases(alias,advisory_id,catalog_scope) VALUES(?,?,?) ON CONFLICT DO NOTHING',(alias,canonical,scope))
             if withdrawn:
-                scope=self._job.get()
-                suffix=' AND repo=?' if scope else ''
-                params=(scope['repo'],) if scope else ()
+                job_scope=self._job.get()
+                suffix=' AND repo=?' if job_scope else ''
+                params=(job_scope['repo'],) if job_scope else ()
                 c.execute("UPDATE advisory_impacts SET state='withdrawn',recommendations='[]',updated_at=? WHERE advisory_id=?"+suffix,(now,canonical,*params))
                 findings=c.execute("SELECT id,repo,details FROM findings WHERE category='dependency' AND status!='resolved'"+suffix,params).fetchall()
                 for finding in findings:
                     details=json.loads(finding['details'])
-                    if details.get('advisory_id',details.get('osv_id'))!=canonical: continue
+                    if details.get('advisory_id',details.get('osv_id')) not in (canonical,raw_canonical): continue
                     c.execute("UPDATE findings SET status='resolved' WHERE id=?",(finding['id'],))
                     self.audit_event(finding['repo'],finding['id'],'intelligence','advisory_withdrawn',{'advisory_id':canonical})
             return canonical
 
-    def advisory(self, id_):
+    def advisory(self, id_, *, catalog_scope=None):
+        scope=self._catalog_scope(catalog_scope)
+        scoped_id=self._scoped_advisory_id(id_,scope)
         with self.conn() as c:
-            row=c.execute('SELECT * FROM advisories WHERE id=?',(id_,)).fetchone()
+            row=c.execute('SELECT * FROM advisories WHERE id=? AND catalog_scope=?',(scoped_id,scope)).fetchone()
             if row is None: return None
             result=dict(row)
             for field in ('aliases','data'): result[field]=json.loads(result[field])
@@ -427,8 +484,9 @@ class Store:
                           'source_sha256':advisory['source_sha256'],'reachability':'unknown'},[])
 
     def source_advisories(self):
+        if self._catalog_scope()!='public': return []
         with self.conn() as c:
-            items=[dict(r) for r in c.execute("SELECT * FROM advisories WHERE source='GitHub webhook' AND withdrawn=0")]
+            items=[dict(r) for r in c.execute("SELECT * FROM advisories WHERE source='GitHub webhook' AND withdrawn=0 AND catalog_scope='public'")]
         for item in items:
             for field in ('aliases','data'): item[field]=json.loads(item[field])
         return items
@@ -449,11 +507,12 @@ class Store:
                 if row['advisory_id'] in seen or row['state']=='withdrawn': continue
                 previous=json.loads(row['evidence'])
                 known=row['state'] if row['state'] in ('affected','not_affected') else previous.get('last_confirmed_state')
-                state='not_affected' if complete and known in ('affected','not_affected') else 'under_investigation'
+                advisory=self.advisory(row['advisory_id'])
+                state='not_affected' if complete and advisory is not None and known in ('affected','not_affected') else 'under_investigation'
                 self.save_impact(repo,row['advisory_id'],state,scan_id,
                     {'reason':'not_returned_by_complete_osv_audit' if state=='not_affected' else 'incomplete_inventory_or_source_confirmation_pending',
                      'reachability':'unknown','coverage_complete':complete,'last_confirmed_state':known,
-                     'advisory_sha256':self.advisory(row['advisory_id'])['source_sha256']},[])
+                     'advisory_sha256':advisory['source_sha256'] if advisory is not None else previous.get('advisory_sha256')},[])
 
     def invalidate_impacts(self, repo, scan_id):
         with self.transaction(), self.conn() as c:
@@ -465,14 +524,14 @@ class Store:
                 self.save_impact(repo,row['advisory_id'],'under_investigation',scan_id,evidence,[])
 
     def list_impacts(self, repo=None, advisory_id=None, state=None, cursor=0, limit=50):
-        clauses=['i.id>?']
-        args=[cursor]
+        clauses=['i.id>?','a.catalog_scope!=?']
+        args=[cursor,'quarantined_legacy']
         for column,value in [('i.repo',repo),('i.state',state)]:
             if value is not None:
                 clauses.append(column+'=?')
                 args.append(value)
         if advisory_id is not None:
-            clauses.append('EXISTS (SELECT 1 FROM advisory_aliases x WHERE x.advisory_id=i.advisory_id AND x.alias=?)')
+            clauses.append('EXISTS (SELECT 1 FROM advisory_aliases x WHERE x.advisory_id=i.advisory_id AND x.catalog_scope=a.catalog_scope AND x.alias=?)')
             args.append(advisory_id)
         with self.conn() as c:
             rows=c.execute('''SELECT i.*,a.summary,a.aliases,a.source,a.withdrawn FROM advisory_impacts i
@@ -486,12 +545,13 @@ class Store:
         return {'items':items,'next_cursor':items[-1]['id'] if len(rows)>limit else None,
                 'filter_scope':'observed_state'}
 
-    def list_advisories(self, limit=50):
+    def list_advisories(self, limit=50, organization_id=None):
+        scope='org:'+organization_id if organization_id else 'public'
         with self.conn() as c:
             rows=c.execute('''SELECT a.id,a.aliases,a.summary,a.source,a.withdrawn,a.first_seen_at,a.updated_at,
                 (SELECT COUNT(*) FROM advisory_impacts i WHERE i.advisory_id=a.id AND i.state='affected') AS affected_projects,
                 (SELECT COUNT(*) FROM advisory_impacts i WHERE i.advisory_id=a.id AND i.state='under_investigation') AS pending_projects
-                FROM advisories a ORDER BY a.updated_at DESC LIMIT ?''',(limit,)).fetchall()
+                FROM advisories a WHERE a.catalog_scope=? ORDER BY a.updated_at DESC LIMIT ?''',(scope,limit)).fetchall()
         items=[dict(row) for row in rows]
         for item in items: item['aliases']=json.loads(item['aliases'])
         return items
@@ -574,7 +634,7 @@ class Store:
     def expire_suppressions(self):
         with self.transaction():
             with self.conn() as c:
-                rows = c.execute("SELECT f.id,f.repo FROM findings f JOIN suppressions s ON s.finding_id=f.id WHERE f.status='suppressed' AND s.expires_at<=?", (time.time(),)).fetchall()
+                rows = c.execute("SELECT f.id,f.repo FROM findings f JOIN suppressions s ON s.finding_id=f.id WHERE f.status IN ('suppressed','risk_accepted') AND s.expires_at<=?", (time.time(),)).fetchall()
                 for r in rows:
                     c.execute("UPDATE findings SET status='open' WHERE id=?", (r['id'],))
                     self.audit_event(r['repo'],r['id'],'system','suppression_expired',{})
@@ -590,7 +650,7 @@ class Store:
                 row = c.execute('SELECT * FROM findings WHERE id=?', (finding_id,)).fetchone()
                 if row is None: return None
                 c.execute('DELETE FROM suppressions WHERE finding_id=?', (finding_id,))
-                if status == 'suppressed':
+                if status in ('suppressed','risk_accepted'):
                     c.execute('INSERT INTO suppressions VALUES(?,?,?)', (finding_id,reason,expires_at))
                 c.execute('UPDATE findings SET status=? WHERE id=?', (status,finding_id))
                 details={'before':row['status'],'after':status,'reason':reason,'expires_at':expires_at}

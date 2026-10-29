@@ -7,8 +7,9 @@ VF-017 — 27 Ekim 2026. Migration 004, ayrı müşteri/operatör bağlantılar�
 | Hesap | Erişim | Nerede kullanılır? |
 |---|---|---|
 | Migration hesabı | Özel uygulama DB/schema sahibi; DDL ve incelemesi yapılmış güvenlik fonksiyonlarının sahibi | Upgrade/provision/SQLite aktarım işi; müşteri API'sinde kullanılamaz |
-| Operatör runtime | Non-owner, NOINHERIT, NOBYPASSRLS; uygulama verisinde açıkça tanımlı global operatör politikası | Login/session, webhook, eski bearer API ve mevcut worker. DDL/role registry/migration yazma yetkisi yok |
+| Operatör runtime | Non-owner, NOINHERIT, NOBYPASSRLS; uygulama verisinde açıkça tanımlı global operatör politikası | Login/session, webhook, eski bearer API ve kuyruk scheduler/claim. DDL/role registry/migration yazma yetkisi yok |
 | Müşteri runtime | Ayrı non-owner, NOINHERIT, NOBYPASSRLS login; yalnız gereken tablo/kolon/sequence yetkileri | Organizasyon API sorguları; geçerli oturum ve org kapsamında |
+| Worker runtime | Ayrı non-owner, NOINHERIT, NOBYPASSRLS login (`--worker-role`, `WORKER_DATABASE_URL`); yalnız iş yürütme tablo/kolon yetkileri | Kuyruk işlerinin yürütülmesi (`WorkerStore`); canlı `job_id` + `claim_token` + `connection_id` + `organization_id` kapsamında |
 
 Runtime hesapları superuser/CREATEDB/CREATEROLE/REPLICATION/BYPASSRLS, başka DB rolüne üyelik veya nesne sahipliği taşıyamaz. Public/yazılabilir schema ve TEMP yetkileri reddedilir. Müşteri hesabında beklenmeyen tablo, kolon, sequence veya gözden geçirilmemiş SECURITY DEFINER fonksiyon erişimi açılışı durdurur. Yalnız tablo bazlı SELECT kontrol edilmez; örneğin session tablosunun tek `token_hash` kolonuna verilen erişim de reddedilir.
 
