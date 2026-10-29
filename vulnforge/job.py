@@ -24,9 +24,10 @@ class JobStore:
 
     Database-role enforcement remains separate; this is an application boundary.
     """
-    REPO_METHODS=frozenset(('repository','upsert_repo','save_finding','replace_inventory',
-        'resolve_missing_dependencies','save_impact','reconcile_impacts','invalidate_impacts',
-        'impact_advisory_ids','save_remediation','has_remediation','remediation_policy','start_scan','audit_event'))
+    REPO_METHODS=frozenset(('repository','upsert_repo','record_branch_head','invalidate_repository_evidence',
+        'save_finding','replace_inventory','resolve_missing_dependencies','save_impact','reconcile_impacts',
+        'invalidate_impacts','impact_advisory_ids','save_remediation','has_remediation','remediation_policy',
+        'start_scan','audit_event'))
     SCAN_METHODS=frozenset(('set_scan_commit','finish_scan','record_scan_finding','scan'))
     PUBLIC_METHODS=frozenset(('advisory','source_advisories','save_advisory'))
 

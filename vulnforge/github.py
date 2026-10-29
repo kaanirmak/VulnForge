@@ -159,6 +159,68 @@ class GitHub:
                 return list(dict.fromkeys(shas))
         raise GitHubError('Compare exceeds 2000 commits; manual reconciliation required')
 
+    async def backfill_commits(self, repo: str, installation_id: int, head_sha: str,
+                               *, stop_sha: str | None = None, max_commits: int = 200) -> tuple[list[str], bool]:
+        if not SHA_RE.fullmatch(head_sha):
+            raise ValueError('Invalid commit SHA')
+        stop=stop_sha if isinstance(stop_sha,str) and SHA_RE.fullmatch(stop_sha) and stop_sha!='0'*40 else None
+        limit=max(1,min(2000,int(max_commits)))
+        per_page=min(100,limit)
+        max_pages=(limit+per_page-1)//per_page
+        collected=[]
+        for page in range(1,max_pages+1):
+            batch=await self.request('GET',f'{self.repo_path(repo)}/commits',installation_id,
+                                     params={'sha':head_sha,'per_page':per_page,'page':page})
+            if not isinstance(batch,list):
+                raise GitHubError('Invalid commit history response')
+            for idx,commit in enumerate(batch):
+                sha=commit.get('sha','') if isinstance(commit,dict) else ''
+                if not SHA_RE.fullmatch(sha):
+                    raise GitHubError('Invalid SHA in commit history')
+                if stop and sha==stop:
+                    return list(dict.fromkeys(reversed(collected))),False
+                collected.append(sha)
+                if len(collected)>=limit:
+                    truncated=(idx+1<len(batch)) or (len(batch)>=per_page)
+                    return list(dict.fromkeys(reversed(collected))),truncated
+            if len(batch)<per_page:
+                if not collected or head_sha not in collected:
+                    raise GitHubError('Incomplete commit history during backfill')
+                return list(dict.fromkeys(reversed(collected))),False
+        return list(dict.fromkeys(reversed(collected))),True
+
+    async def reconcile_push(self, repo: str, installation_id: int, before: str, after: str,
+                             fallback: list[str], *, forced: bool = False,
+                             last_sha: str | None = None, max_backfill: int = 200) -> dict:
+        """Reconcile initial branch, missed deliveries, force-push, and oversized pushes."""
+        if not SHA_RE.fullmatch(after):
+            raise ValueError('Invalid commit SHA')
+        valid_before=isinstance(before,str) and bool(SHA_RE.fullmatch(before)) and before!='0'*40
+        valid_last=isinstance(last_sha,str) and bool(SHA_RE.fullmatch(last_sha)) and last_sha!='0'*40
+        if not valid_before:
+            shas,truncated=await self.backfill_commits(repo,installation_id,after,max_commits=max_backfill)
+            return {'shas':shas,'mode':'initial_branch','truncated':truncated,'base_sha':'0'*40}
+        if forced:
+            stop=last_sha if valid_last else before
+            shas,truncated=await self.backfill_commits(repo,installation_id,after,stop_sha=stop,max_commits=max_backfill)
+            return {'shas':shas,'mode':'force_push_backfill','truncated':truncated,'base_sha':stop}
+        base=last_sha if (valid_last and last_sha!=before) else before
+        mode='missed_delivery_backfill' if base!=before else 'linear'
+        try:
+            shas=await self.commit_shas(repo,installation_id,base,after,fallback)
+            if len(shas)>max_backfill:
+                return {'shas':shas[-max_backfill:],'mode':'large_push_backfill','truncated':True,'base_sha':base}
+            return {'shas':shas,'mode':mode,'truncated':False,'base_sha':base}
+        except GitHubError as exc:
+            msg=str(exc)
+            if 'Non-linear/force push' in msg:
+                shas,truncated=await self.backfill_commits(repo,installation_id,after,stop_sha=base,max_commits=max_backfill)
+                return {'shas':shas,'mode':'force_push_backfill','truncated':truncated,'base_sha':base}
+            if 'exceeds 2000 commits' in msg:
+                shas,truncated=await self.backfill_commits(repo,installation_id,after,stop_sha=base,max_commits=max_backfill)
+                return {'shas':shas,'mode':'large_push_backfill','truncated':True,'base_sha':base}
+            raise
+
     async def changed_files(self, repo: str, installation_id: int, sha: str):
         if not SHA_RE.fullmatch(sha):
             raise ValueError('Invalid commit SHA')

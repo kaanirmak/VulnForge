@@ -71,12 +71,32 @@ class Agent:
 
     async def push(self, repo: str, installation_id: int, default_branch: str, payload: dict):
         self.cfg.require_source_access()
-        shas=await self.github.commit_shas(repo,installation_id,payload['before'],payload['after'],
-                                           payload.get('commits', []))
+        is_default=payload.get('ref')==f'refs/heads/{default_branch}'
+        row=self.store.repository(repo)
+        last_sha=row.get('last_sha') if (row and is_default) else None
+        if hasattr(self.github,'reconcile_push'):
+            reconciled=await self.github.reconcile_push(
+                repo,installation_id,payload['before'],payload['after'],payload.get('commits',[]),
+                forced=bool(payload.get('forced',False)),last_sha=last_sha)
+            shas=reconciled['shas']
+            mode=reconciled['mode']
+            truncated=bool(reconciled['truncated'])
+            base_sha=reconciled['base_sha']
+        else:
+            shas=await self.github.commit_shas(repo,installation_id,payload['before'],payload['after'],
+                                               payload.get('commits', []))
+            mode,truncated,base_sha='linear',False,payload['before']
+        if mode!='linear' or truncated:
+            if is_default and (payload.get('forced') or truncated or mode!='initial_branch'):
+                self.store.invalidate_repository_evidence(repo)
+            self.store.audit_event(repo,None,'system','push_reconciled',{
+                'mode':mode,'truncated':truncated,'base_sha':base_sha,
+                'after':payload['after'],'commits_queued':len(shas)})
         for sha in shas:
             self.store.enqueue('commit_scan',repo,{'sha':sha},f'commit:{repo}:{sha}')
         # Dependency inventory must refer to current protected default branch, not arbitrary feature pushes.
-        if payload.get('ref')==f'refs/heads/{default_branch}':
+        if is_default:
+            self.store.record_branch_head(repo,payload['after'])
             self.store.enqueue('dependency_audit',repo,{},f'audit:push:{repo}:{payload["after"]}')
 
     async def scan_commit(self, repo: str, installation_id: int, sha: str, pr_number=None):

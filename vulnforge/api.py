@@ -230,12 +230,21 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
                 continue
             branch=item.get('default_branch') or 'main'
             store.upsert_repo(name,installation_id,branch)
-            if event=='push' and data.get('ref')=='refs/heads/'+branch:
-                # Keep a monotonic local invalidation, even in customer-runner
-                # mode. An out-of-order delivery may require an extra scan but
-                # must never make an older snapshot look current again.
-                store.invalidate_repository_evidence(name)
-                store.audit_event(name,None,'github_webhook','default_branch_push_observed',{})
+            if event=='push' and data.get('ref','').startswith('refs/heads/'):
+                deleted=bool(data.get('deleted',False)) or data.get('after')=='0'*40
+                if deleted:
+                    if data.get('ref')=='refs/heads/'+branch:
+                        store.invalidate_repository_evidence(name)
+                        store.audit_event(name,None,'github_webhook','default_branch_deleted_observed',{'ref':data['ref']})
+                    else:
+                        store.audit_event(name,None,'github_webhook','branch_deleted_observed',{'ref':data['ref']})
+                elif data.get('ref')=='refs/heads/'+branch:
+                    # Keep a monotonic local invalidation, even in customer-runner
+                    # mode. An out-of-order delivery may require an extra scan but
+                    # must never make an older snapshot look current again.
+                    store.invalidate_repository_evidence(name)
+                    store.audit_event(name,None,'github_webhook','default_branch_push_observed',
+                                      {'forced':bool(data.get('forced',False))})
             if cfg.scan_mode=='customer_runner':
                 # All current worker jobs need source access. Customer mode
                 # records integration metadata without generating source jobs.
@@ -246,7 +255,7 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
                 number=data.get('number')
                 if isinstance(sha,str) and SHA_RE.fullmatch(sha) and type(number) is int and number>0:
                     queued+=store.enqueue('pull_request_scan',name,{'sha':sha,'number':number},f'pr:{name}:{number}:{sha}')
-            elif event=='push' and not data.get('deleted',False) and data.get('ref','').startswith('refs/heads/'):
+            elif event=='push' and not data.get('deleted',False) and data.get('after')!='0'*40 and data.get('ref','').startswith('refs/heads/'):
                 after=data.get('after','')
                 before=data.get('before','')
                 if not SHA_RE.fullmatch(after):
@@ -254,7 +263,8 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
                 if not SHA_RE.fullmatch(before):
                     before='0'*40
                 shas=[c.get('id','') for c in data.get('commits',[]) if isinstance(c,dict)]
-                payload={'before':before,'after':after,'commits':shas,'ref':data['ref']}
+                payload={'before':before,'after':after,'commits':shas,'ref':data['ref'],
+                         'forced':bool(data.get('forced',False))}
                 queued+=store.enqueue('push',name,payload,f'push:{delivery}:{name}')
             elif event=='dependabot_alert' and action in ('created','reopened','reintroduced','fixed','dismissed'):
                 queued+=store.enqueue('dependency_audit',name,{},f'alert:{delivery}:{name}')

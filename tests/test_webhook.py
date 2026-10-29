@@ -82,3 +82,70 @@ def test_new_global_advisory_targets_only_matching_projects(tmp_path):
     assert res.status_code==202 and res.json()['matching_repositories']==1
     jobs=store.list_rows('jobs')
     assert len(jobs)==1 and jobs[0]['repo']=='org/affected'
+
+
+def test_deleted_branch_and_reconciled_push_worker_flow(tmp_path):
+    import asyncio, json
+    from vulnforge.worker import Agent
+    client,store=setup(tmp_path)
+    s1,s2,s3='1'*40,'2'*40,'3'*40
+    deleted_default=json.dumps({
+        'repository':{'full_name':'test/backend','default_branch':'main'},
+        'installation':{'id':123},
+        'ref':'refs/heads/main',
+        'before':s1,
+        'after':'0'*40,
+        'deleted':True,
+        'commits':[],
+    }).encode()
+    res=client.post('/github/webhook',content=deleted_default,headers=signed('push',deleted_default))
+    assert res.status_code==202 and res.json()['queued']==0
+    events=store.list_rows('audit_events',repo='test/backend')
+    assert any(e['action']=='default_branch_deleted_observed' for e in events)
+    assert store.repository('test/backend')['evidence_invalidated_at'] is not None
+
+    deleted_feature=json.dumps({
+        'repository':{'full_name':'test/backend','default_branch':'main'},
+        'installation':{'id':123},
+        'ref':'refs/heads/feature/x',
+        'before':s1,
+        'after':'0'*40,
+        'deleted':True,
+        'commits':[],
+    }).encode()
+    res=client.post('/github/webhook',content=deleted_feature,headers=signed('push',deleted_feature))
+    assert res.status_code==202 and res.json()['queued']==0
+    events=store.list_rows('audit_events',repo='test/backend')
+    assert any(e['action']=='branch_deleted_observed' for e in events)
+
+    store.record_branch_head('test/backend',s1)
+    force_push=json.dumps({
+        'repository':{'full_name':'test/backend','default_branch':'main'},
+        'installation':{'id':123},
+        'ref':'refs/heads/main',
+        'before':s2,
+        'after':s3,
+        'forced':True,
+        'commits':[{'id':s3}],
+    }).encode()
+    res=client.post('/github/webhook',content=force_push,headers=signed('push',force_push))
+    assert res.status_code==202 and res.json()['queued']==1
+    job=store.claim()
+    assert job is not None and json.loads(job['payload'])['forced'] is True
+
+    class FakeGitHub:
+        async def reconcile_push(self, repo, install, before, after, fallback, *, forced=False, last_sha=None, max_backfill=250):
+            assert forced is True and last_sha==s1
+            return {'shas':[s2,s3],'mode':'force_push_backfill','truncated':False,'base_sha':s1}
+    class FakeOSV:
+        pass
+    agent=Agent(Config(),store,FakeGitHub(),FakeOSV())
+    asyncio.run(agent.process(job))
+    store.finish(job)
+    assert store.repository('test/backend')['last_sha']==s3
+    queued=store.list_rows('jobs',repo='test/backend')
+    kinds=[j['kind'] for j in queued if j['state']=='pending']
+    assert kinds.count('commit_scan')==2 and 'dependency_audit' in kinds
+    events=store.list_rows('audit_events',repo='test/backend')
+    reconciled=[ json.loads(e['details']) for e in events if e['action']=='push_reconciled' ]
+    assert reconciled and reconciled[0]['mode']=='force_push_backfill' and reconciled[0]['base_sha']==s1

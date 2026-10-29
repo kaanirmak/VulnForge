@@ -171,6 +171,10 @@ class Store:
         with self.conn() as c:
             c.execute('UPDATE repositories SET evidence_invalidated_at=? WHERE full_name=?',(time.time(),repo))
 
+    def record_branch_head(self,repo: str,sha: str):
+        with self.conn() as c:
+            c.execute('UPDATE repositories SET last_sha=?,updated_at=? WHERE full_name=?',(sha,time.time(),repo))
+
     def repository(self,repo):
         with self.conn() as c:
             row=c.execute('SELECT * FROM repositories WHERE full_name=?',(repo,)).fetchone()
