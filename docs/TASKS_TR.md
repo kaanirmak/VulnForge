@@ -6,7 +6,7 @@
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 690 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 693 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -87,7 +87,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-051: Ayrı advisory ingestion görevi oluştur; kaynak cursor'u, tekrar ve kesinti sonrası devamı kalıcı tut.
   `Store` üzerinde kalıcı `advisory_ingestion_state` (kaynak, cursor, status, retry_count, processed_count, last_success_at) ve kesinti sonrası cursor'dan devam eden, hatalarda üstel tekrar sayan `AdvisoryIngestionRunner` işleyicisi eklendi.
 - [x] VF-052: GHSA değişiklik/withdrawal akışını uzlaştır; OSV ile alias ve revision geçmişini ilişkilendir.
-- [ ] VF-053: NVD/CVSS ve EPSS kaynaklarını ekle; KEV ile birlikte kaynak/zaman/hash kanıtını koru.
+- [x] VF-053: NVD/CVSS ve EPSS kaynaklarını ekle; KEV ile birlikte kaynak/zaman/hash kanıtını koru.
+  NVD (CVSS v3.1/v3.0/v2.0) ve FIRST EPSS istemcileri ve parser'ları, kaynak SHA-256 ve zaman kanıtlarını koruyan `VulnerabilityMetrics` / `enrich_advisory_metrics` modeli ve kalıcı `vulnerability_metrics` veritabanı deposu eklendi.
 - [x] VF-054: Eksik veya eski envanter ile eski istihbaratı görünür yap; güvenli sonuç veya güncel öneri olarak sunma.
 - [x] VF-055: Ekosisteme uygun sürüm karşılaştırmalarını genişlet; desteklenmeyen aralığı unknown tut.
 - [ ] VF-056: Yeni açık→paket→proje→snapshot ilişkisini sürümlü geçmişiyle sakla.

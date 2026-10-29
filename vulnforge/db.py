@@ -642,6 +642,48 @@ class Store:
             result['revision_count']=len(result['revisions'])
             return result
 
+    def _ensure_vulnerability_metrics_table(self, c):
+        c.execute('''CREATE TABLE IF NOT EXISTS vulnerability_metrics (
+            cve_id TEXT PRIMARY KEY,
+            cvss_score REAL,
+            cvss_severity TEXT,
+            cvss_vector TEXT,
+            epss_score REAL,
+            epss_percentile REAL,
+            kev_date_added TEXT,
+            kev_ransomware INTEGER NOT NULL DEFAULT 0,
+            evidence TEXT NOT NULL,
+            updated_at REAL NOT NULL
+        )''')
+
+    def save_vulnerability_metrics(self, metrics):
+        now = time.time()
+        ev_json = json.dumps(metrics.evidence, sort_keys=True)
+        with self.transaction(), self.conn() as c:
+            self._ensure_vulnerability_metrics_table(c)
+            c.execute('''INSERT INTO vulnerability_metrics
+                (cve_id, cvss_score, cvss_severity, cvss_vector, epss_score, epss_percentile, kev_date_added, kev_ransomware, evidence, updated_at)
+                VALUES(?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(cve_id) DO UPDATE SET
+                cvss_score=excluded.cvss_score, cvss_severity=excluded.cvss_severity, cvss_vector=excluded.cvss_vector,
+                epss_score=excluded.epss_score, epss_percentile=excluded.epss_percentile,
+                kev_date_added=excluded.kev_date_added, kev_ransomware=excluded.kev_ransomware,
+                evidence=excluded.evidence, updated_at=excluded.updated_at''',
+                (metrics.cve_id, metrics.cvss_score, metrics.cvss_severity, metrics.cvss_vector,
+                 metrics.epss_score, metrics.epss_percentile, metrics.kev_date_added,
+                 int(metrics.kev_ransomware), ev_json, now))
+
+    def get_vulnerability_metrics(self, cve_id: str) -> dict | None:
+        with self.conn() as c:
+            self._ensure_vulnerability_metrics_table(c)
+            row = c.execute('SELECT * FROM vulnerability_metrics WHERE cve_id=?', (cve_id,)).fetchone()
+            if row is None:
+                return None
+            res = dict(row)
+            res['evidence'] = json.loads(res['evidence']) if res.get('evidence') else {}
+            res['kev_ransomware'] = bool(res.get('kev_ransomware'))
+            return res
+
     def save_impact(self, repo, advisory_id, state, scan_id, evidence, recommendations):
         with self.conn() as c:
             c.execute('''INSERT INTO advisory_impacts(repo,advisory_id,state,scan_id,evidence,recommendations,updated_at)
