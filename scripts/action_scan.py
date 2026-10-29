@@ -1,7 +1,9 @@
 """Trusted composite-action entry point. Never import modules from the checkout."""
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import sys
@@ -13,6 +15,13 @@ from vulnforge.cli import PROFILES,compare_pr_reports,scan,write_report
 def main():
     directory=None
     try:
+        expected_sha=os.environ.get('VF_EXPECTED_SCRIPT_SHA256','').strip()
+        if expected_sha:
+            if not re.fullmatch(r'[0-9a-f]{64}',expected_sha):
+                raise ValueError('Invalid expected script SHA-256')
+            actual_sha=hashlib.sha256(Path(__file__).resolve(strict=True).read_bytes()).hexdigest()
+            if actual_sha!=expected_sha:
+                raise ValueError('Action entrypoint checksum mismatch')
         root=Path(os.environ['VF_ROOT']).resolve(strict=True)
         interpreter=Path(sys.executable).resolve(strict=True)
         if interpreter.is_relative_to(root):

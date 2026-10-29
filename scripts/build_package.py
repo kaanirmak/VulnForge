@@ -29,14 +29,49 @@ def build(output,allow_dirty=False):
     wheels=list(output.glob('vulnforge_mvp-*.whl'))
     if len(wheels)!=1:raise ValueError('Output folder must contain exactly one VulnForge wheel')
     wheel=wheels[0];checksum=hashlib.sha256(wheel.read_bytes()).hexdigest()
+    action_sha=hashlib.sha256((ROOT/'action.yml').read_bytes()).hexdigest()
+    action_script_sha=hashlib.sha256((ROOT/'scripts/action_scan.py').read_bytes()).hexdigest()
+    cli_sha=hashlib.sha256((ROOT/'vulnforge/cli.py').read_bytes()).hexdigest()
+    lock_sha=hashlib.sha256((ROOT/'requirements/runtime.lock').read_bytes()).hexdigest()
     manifest={'artifact':wheel.name,'sha256':checksum,'source_revision':None if dirty else revision,
         'source_base_revision':revision,'source_dirty':dirty,'source_date_epoch':int(epoch),
         'build_backend':'setuptools=='+expected,'python':sys.version.split()[0],
         'published':False,'signed':False,
-        'dependency_lock_sha256':hashlib.sha256((ROOT/'requirements/runtime.lock').read_bytes()).hexdigest()}
+        'dependency_lock_sha256':lock_sha,
+        'action_yml_sha256':action_sha,
+        'action_script_sha256':action_script_sha,
+        'cli_sha256':cli_sha,
+        'provenance':{
+            'predicate_type':'https://slsa.dev/provenance/v1',
+            'subject':{'name':wheel.name,'digest':{'sha256':checksum}},
+            'materials':[
+                {'uri':'requirements/runtime.lock','digest':{'sha256':lock_sha}},
+                {'uri':'action.yml','digest':{'sha256':action_sha}},
+                {'uri':'scripts/action_scan.py','digest':{'sha256':action_script_sha}},
+                {'uri':'vulnforge/cli.py','digest':{'sha256':cli_sha}},
+            ],
+        }}
     (output/'SHA256SUMS').write_text(checksum+'  '+wheel.name+'\n')
     (output/'build-manifest.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
     return manifest
+
+
+def verify_distribution(output) -> dict:
+    output=Path(output).resolve()
+    manifest=json.loads((output/'build-manifest.json').read_text(encoding='utf-8'))
+    sums=(output/'SHA256SUMS').read_text(encoding='utf-8').strip().splitlines()
+    if len(sums)!=1: raise ValueError('Invalid SHA256SUMS')
+    digest,name=sums[0].split('  ',1)
+    wheel=output/name
+    if name!=manifest['artifact'] or digest!=manifest['sha256']:
+        raise ValueError('Manifest and SHA256SUMS mismatch')
+    actual=hashlib.sha256(wheel.read_bytes()).hexdigest()
+    if actual!=digest:
+        raise ValueError('Wheel SHA-256 verification failed')
+    lock_sha=hashlib.sha256((ROOT/'requirements/runtime.lock').read_bytes()).hexdigest()
+    if manifest.get('dependency_lock_sha256')!=lock_sha:
+        raise ValueError('Runtime lockfile SHA-256 mismatch')
+    return {'verified':True,'artifact':name,'sha256':actual,'dependency_lock_sha256':lock_sha}
 
 
 def main():

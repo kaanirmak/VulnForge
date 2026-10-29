@@ -95,3 +95,34 @@ def test_action_require_complete_and_workflow_template_generation(tmp_path):
         render_workflow_template('pull_request',action_ref=pinned,runner_labels=['self-hosted','linux'])
     with pytest.raises(ValueError):
         render_workflow_template('default_branch',action_ref=pinned,scanner_python='/github/workspace/bin/python')
+
+
+def test_pinned_lockfiles_script_checksum_and_distribution_provenance(tmp_path):
+    import hashlib, json, re
+    from scripts import build_package
+    root,temp,output,env=environment(tmp_path)
+    (root/'code.py').write_text('x = 1\n')
+    script=Path(__file__).resolve().parents[1]/'scripts/action_scan.py'
+    script_sha=hashlib.sha256(script.read_bytes()).hexdigest()
+    ok=subprocess.run([sys.executable,'-I',str(script)],cwd=root,
+                      env={**env,'VF_EXPECTED_SCRIPT_SHA256':script_sha},capture_output=True,text=True)
+    assert ok.returncode==0
+    bad=subprocess.run([sys.executable,'-I',str(script)],cwd=root,
+                       env={**env,'VF_EXPECTED_SCRIPT_SHA256':'0'*64},capture_output=True,text=True)
+    assert bad.returncode==2
+
+    repo_root=Path(__file__).resolve().parents[1]
+    meta=json.loads((repo_root/'requirements/lock-metadata.json').read_text(encoding='utf-8'))
+    assert set(meta['runtime']).issubset(set(meta['development']))
+    for pkg,digests in meta['hashes'].items():
+        assert digests and all(re.fullmatch(r'[0-9a-f]{64}',d) for d in digests)
+
+    dist_dir=tmp_path/'dist'
+    manifest=build_package.build(dist_dir,allow_dirty=True)
+    assert manifest['provenance']['predicate_type']=='https://slsa.dev/provenance/v1'
+    assert manifest['action_script_sha256']==script_sha
+    verified=build_package.verify_distribution(dist_dir)
+    assert verified['verified'] is True and verified['sha256']==manifest['sha256']
+    (dist_dir/manifest['artifact']).write_bytes(b'corrupted')
+    with pytest.raises(ValueError):
+        build_package.verify_distribution(dist_dir)

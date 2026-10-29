@@ -25,6 +25,9 @@ inputs:
   base-root:
     description: Optional base checkout root for pull_request profile comparison.
     default: ''
+  expected-script-sha256:
+    description: Optional SHA-256 checksum for scripts/action_scan.py verification.
+    default: ''
 outputs:
   code-report:
     description: Local metadata report path; no source artifact is uploaded.
@@ -46,6 +49,7 @@ runs:
         VF_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
         VF_PROFILE: ${{ inputs.profile }}
         VF_BASE_ROOT: ${{ inputs.base-root }}
+        VF_EXPECTED_SCRIPT_SHA256: ${{ inputs.expected-script-sha256 }}
         VF_ACTION: ${{ github.action_path }}
       run: |
         set -euo pipefail
