@@ -128,7 +128,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `OrganizationData.remediation_plans` ve `GET /api/v1/organizations/{org_id}/remediations` (status filtresi: `pending_approval`, `validated`, `blocked`, `published`, `all`), `approve_patch` (`POST /remediations/{plan_id}/approve`) onay akışı ve `account.html` tablosu eklenerek onay bekleyen, doğrulanan, engellenen ve yayımlanan düzeltmeler ayrı kategoriler ve özet sayaçlarıyla tamamlandı.
 - [x] VF-077: Kullanıcıların ayarlayabildiği e-posta/Slack/Teams bildirim entegrasyonları oluştur.
   E-posta, Slack (Blocks API) ve Microsoft Teams (MessageCard) biçimlendiricileri, `NotificationDispatcher` gönderim motoru, `notification_channels` deposu ve REST endpoint'leri (`GET/POST /notifications/channels`, `PUT/DELETE /channels/{id}`, `POST /channels/{id}/test`) ile kullanıcı ayarlı bildirim kanalları tamamlandı.
-- [ ] VF-078: Bildirim dedup'u, toplulaştırma, kritik risk escalation'ı ve hassas içerik filtrelerini uygula.
+- [x] VF-078: Bildirim dedup'u, toplulaştırma, kritik risk escalation'ı ve hassas içerik filtrelerini uygula.
+  `NotificationDeduplicator` ile parmak izi ve cooldown tabanlı dedup kontrolü, `NotificationAggregator` ile çoklu tarama bulgularını tek bir digest'e dönüştürme, `is_critical_escalation` ile P0 / CISA KEV / EPSS >= 0.70 için acil bildirim escalation'ı ve cooldown bypass'ı, `scrub_sensitive_notification_content` ile API key, private key, token ve credential filtreleme tamamlandı.
 - [ ] VF-079: API'leri tutarlı v1 şeması, filtreler, cursor, hata kodu, request ID ve mutation idempotency ile tamamla.
 - [ ] VF-080: Mobil/erişilebilir kullanım, boş/hata/expired-session durumları ve gizlilik/bağlantı silme ayarlarını tamamla.
 
