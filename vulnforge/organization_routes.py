@@ -241,6 +241,9 @@ def install_organization_routes(app,cfg,store):
     @router.get('/overview')
     async def overview(data=Depends(scoped)): return data.overview()
 
+    @router.get('/onboarding')
+    async def onboarding(data=Depends(scoped)): return data.onboarding()
+
     @router.get('/repositories')
     async def repositories(limit:int=Query(50,ge=1,le=100),data=Depends(scoped)):
         return data.rows('repositories',limit=limit)

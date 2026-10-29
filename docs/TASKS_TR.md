@@ -116,7 +116,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 
 ## H. Kullanıcı paneli, bildirimler ve API — P1
 
-- [ ] VF-071: Organizasyon/repo seçimi, kurulum durumu ve ilk kullanım ekranlarını tamamla.
+- [x] VF-071: Organizasyon/repo seçimi, kurulum durumu ve ilk kullanım ekranlarını tamamla.
 - [ ] VF-072: Proje risk özeti, son tarama, kapsam, istihbarat tazeliği ve bağlantı sağlığını göster.
 - [ ] VF-073: Bulgu detayında kanıt, advisory, paket grafı, SHA, geçmiş ve güncelleme alternatiflerini göster.
 - [ ] VF-074: Etkilenen projeler ve öneriler ekranına sahip atama, toplu filtre ve geçmiş karşılaştırması ekle.

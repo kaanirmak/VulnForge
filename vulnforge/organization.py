@@ -93,6 +93,38 @@ class OrganizationData:
                 result[name]=c.execute(sql+condition,args).fetchone()[0]
             return result
 
+    def onboarding(self):
+        with self.access('project.read') as c:
+            sql, args = self.query('repositories', 'COUNT(*)')
+            repo_count = c.execute(sql, args).fetchone()[0]
+
+            sql, args = self.query('scans', 'COUNT(*)')
+            scan_count = c.execute(sql, args).fetchone()[0]
+
+            sql, args = self.query('findings', 'COUNT(*)')
+            finding_count = c.execute(sql, args).fetchone()[0]
+
+            install_status = 'installed' if repo_count > 0 else 'pending_setup'
+            steps = [
+                {'step': 'create_organization', 'title': 'Kuruluş oluştur', 'completed': True},
+                {'step': 'connect_repository', 'title': 'GitHub projesi bağla', 'completed': repo_count > 0},
+                {'step': 'run_initial_scan', 'title': 'İlk taramayı tamamla', 'completed': scan_count > 0},
+                {'step': 'review_findings', 'title': 'Güvenlik bulgularını incele', 'completed': scan_count > 0}
+            ]
+            completed_count = sum(1 for s in steps if s['completed'])
+            next_step = next((s['step'] for s in steps if not s['completed']), 'completed')
+            return {
+                'organization_id': self.organization_id,
+                'installation_status': install_status,
+                'steps': steps,
+                'steps_completed': completed_count,
+                'total_steps': len(steps),
+                'next_step': next_step,
+                'repo_count': repo_count,
+                'scan_count': scan_count,
+                'finding_count': finding_count
+            }
+
     def rows(self,table,repo=None,limit=50,cursor=0,status=None,severity=None):
         permission={'findings':'finding.read','scans':'scan.read'}.get(table,'project.read')
         if table not in TABLES or table=='advisory_impacts': raise ValueError('Unsupported customer table')
