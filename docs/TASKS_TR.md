@@ -130,7 +130,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   E-posta, Slack (Blocks API) ve Microsoft Teams (MessageCard) biçimlendiricileri, `NotificationDispatcher` gönderim motoru, `notification_channels` deposu ve REST endpoint'leri (`GET/POST /notifications/channels`, `PUT/DELETE /channels/{id}`, `POST /channels/{id}/test`) ile kullanıcı ayarlı bildirim kanalları tamamlandı.
 - [x] VF-078: Bildirim dedup'u, toplulaştırma, kritik risk escalation'ı ve hassas içerik filtrelerini uygula.
   `NotificationDeduplicator` ile parmak izi ve cooldown tabanlı dedup kontrolü, `NotificationAggregator` ile çoklu tarama bulgularını tek bir digest'e dönüştürme, `is_critical_escalation` ile P0 / CISA KEV / EPSS >= 0.70 için acil bildirim escalation'ı ve cooldown bypass'ı, `scrub_sensitive_notification_content` ile API key, private key, token ve credential filtreleme tamamlandı.
-- [ ] VF-079: API'leri tutarlı v1 şeması, filtreler, cursor, hata kodu, request ID ve mutation idempotency ile tamamla.
+- [x] VF-079: API'leri tutarlı v1 şeması, filtreler, cursor, hata kodu, request ID ve mutation idempotency ile tamamla.
+  `X-Request-ID` otomatik üretimi ve istemci izleme zinciri, `Idempotency-Key` tabanlı mutation deduplication ve conflict koruması, `X-Error-Code` ve yapılandırılmış v1 hata şeması (`error_code`, `message`, `request_id`), `GET /notifications/channels` ve koleksiyon rotalarında tutarlı limit/cursor/next_cursor sayfalama şeması tamamlandı.
 - [ ] VF-080: Mobil/erişilebilir kullanım, boş/hata/expired-session durumları ve gizlilik/bağlantı silme ayarlarını tamamla.
 
 ## I. Altyapı, sırlar ve işletim — P0 temel / P1 ölçek

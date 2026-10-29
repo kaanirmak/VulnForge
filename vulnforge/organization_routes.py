@@ -1,8 +1,11 @@
 """Local-only customer API preview. Production tenant readiness remains false."""
 import hmac
+import re
+import time
+import uuid
 from typing import Literal
 
-from fastapi import APIRouter,Depends,HTTPException,Query,Request
+from fastapi import APIRouter,Depends,HTTPException,Query,Request,Response
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -15,6 +18,21 @@ from .reports import sarif,sbom
 from .rls import CustomerStore,verify_operator
 
 ROOT='/api/v1/organizations'
+
+ERROR_CODE_MAP = {
+    400: 'BAD_REQUEST',
+    401: 'UNAUTHORIZED',
+    403: 'FORBIDDEN',
+    404: 'NOT_FOUND',
+    409: 'CONFLICT',
+    413: 'PAYLOAD_TOO_LARGE',
+    422: 'UNPROCESSABLE_ENTITY',
+    500: 'INTERNAL_ERROR',
+    502: 'BAD_GATEWAY',
+    503: 'SERVICE_UNAVAILABLE'
+}
+
+_IDEMPOTENCY_RECORDS: dict[str, dict] = {}
 
 
 class CustomerTriage(BaseModel):
@@ -128,35 +146,144 @@ def install_organization_routes(app,cfg,store):
             raise HTTPException(403,'Session or CSRF check failed')
 
     @app.middleware('http')
-    async def preview_boundaries(request,call_next):
-        protected=request.scope['path']==ROOT or request.scope['path'].startswith(ROOT+'/')
-        if protected and request.method in ('POST','PUT','PATCH'):
-            chunks=[];size=0
+    async def preview_boundaries(request: Request, call_next):
+        protected = request.scope['path'] == ROOT or request.scope['path'].startswith(ROOT + '/')
+        req_id = request.headers.get('x-request-id')
+        if not req_id or not re.match(r'^[A-Za-z0-9_-]{8,64}$', req_id):
+            req_id = f"req-{uuid.uuid4().hex[:16]}"
+        request.state.request_id = req_id
+
+        if protected and request.method in ('POST', 'PUT', 'PATCH'):
+            chunks = []; size = 0
             async for chunk in request.stream():
-                size+=len(chunk)
-                if size>4096:
-                    return JSONResponse({'detail':'Customer request exceeds limit'},status_code=413,
-                        headers={'Cache-Control':'no-store','Referrer-Policy':'no-referrer'})
+                size += len(chunk)
+                if size > 4096:
+                    return JSONResponse({
+                        'detail': 'Customer request exceeds limit',
+                        'error_code': 'PAYLOAD_TOO_LARGE',
+                        'message': 'Customer request exceeds limit',
+                        'request_id': req_id
+                    }, status_code=413, headers={
+                        'Cache-Control': 'no-store',
+                        'Referrer-Policy': 'no-referrer',
+                        'X-Request-ID': req_id
+                    })
                 chunks.append(chunk)
-            # Starlette's cached Request replays the bounded body to the router.
-            request._body=b''.join(chunks)
-        response=await call_next(request)
+            request._body = b''.join(chunks)
+
+        idemp_key = request.headers.get('idempotency-key') or request.headers.get('x-idempotency-key')
+        full_key = None
+        if protected and idemp_key and request.method in ('POST', 'PUT', 'PATCH', 'DELETE'):
+            full_key = f"{request.method}:{request.scope['path']}:{idemp_key}"
+            record = _IDEMPOTENCY_RECORDS.get(full_key)
+            if record:
+                if record.get('status') == 'in_progress':
+                    return JSONResponse({
+                        'detail': 'A mutation with this Idempotency-Key is currently in progress',
+                        'error_code': 'IDEMPOTENCY_CONFLICT',
+                        'message': 'A mutation with this Idempotency-Key is currently in progress',
+                        'request_id': req_id
+                    }, status_code=409, headers={
+                        'X-Request-ID': req_id,
+                        'Cache-Control': 'no-store',
+                        'Referrer-Policy': 'no-referrer'
+                    })
+                elif record.get('status') == 'completed':
+                    return Response(
+                        content=record['body'],
+                        status_code=record['status_code'],
+                        headers={
+                            **record.get('headers', {}),
+                            'X-Request-ID': req_id,
+                            'X-Idempotent-Replayed': 'true',
+                            'Cache-Control': 'no-store',
+                            'Referrer-Policy': 'no-referrer'
+                        },
+                        media_type=record.get('media_type', 'application/json')
+                    )
+            _IDEMPOTENCY_RECORDS[full_key] = {'status': 'in_progress', 'created_at': time.time()}
+
+        try:
+            response = await call_next(request)
+        except Exception:
+            if full_key:
+                _IDEMPOTENCY_RECORDS.pop(full_key, None)
+            raise
+
         if protected:
-            response.headers['Cache-Control']='no-store'
-            response.headers['Referrer-Policy']='no-referrer'
+            response.headers['Cache-Control'] = 'no-store'
+            response.headers['Referrer-Policy'] = 'no-referrer'
+        response.headers['X-Request-ID'] = req_id
+
+        if full_key and idemp_key:
+            try:
+                body_chunks = []
+                async for chunk in response.body_iterator:
+                    body_chunks.append(chunk)
+                response_body = b''.join(body_chunks)
+                if 200 <= response.status_code < 500:
+                    _IDEMPOTENCY_RECORDS[full_key] = {
+                        'status': 'completed',
+                        'status_code': response.status_code,
+                        'body': response_body,
+                        'headers': {k: v for k, v in response.headers.items() if k.lower() not in ('content-length', 'content-encoding')},
+                        'media_type': response.media_type or 'application/json',
+                        'created_at': time.time()
+                    }
+                else:
+                    _IDEMPOTENCY_RECORDS.pop(full_key, None)
+                response = Response(
+                    content=response_body,
+                    status_code=response.status_code,
+                    headers=dict(response.headers),
+                    media_type=response.media_type
+                )
+            except Exception:
+                _IDEMPOTENCY_RECORDS.pop(full_key, None)
+
         return response
 
+    def error_response(request: Request, status_code: int, detail: str, error_code: str):
+        req_id = getattr(request.state, 'request_id', 'req-unknown')
+        headers = {
+            'Cache-Control': 'no-store',
+            'Referrer-Policy': 'no-referrer',
+            'X-Request-ID': req_id,
+            'X-Error-Code': error_code
+        }
+        v1_requested = bool(request.headers.get('x-request-id') or request.headers.get('idempotency-key') or request.headers.get('x-v1-schema'))
+        if v1_requested:
+            body = {
+                'detail': detail,
+                'error_code': error_code,
+                'message': detail,
+                'request_id': req_id
+            }
+        else:
+            body = {'detail': detail}
+        return JSONResponse(body, status_code=status_code, headers=headers)
+
+    @app.exception_handler(HTTPException)
+    async def http_error(request: Request, exc: HTTPException):
+        code = ERROR_CODE_MAP.get(exc.status_code, 'HTTP_ERROR')
+        if request.scope['path'] == ROOT or request.scope['path'].startswith(ROOT + '/'):
+            return error_response(request, exc.status_code, str(exc.detail), code)
+        req_id = getattr(request.state, 'request_id', 'req-unknown')
+        return JSONResponse({'detail': exc.detail}, status_code=exc.status_code, headers={'X-Request-ID': req_id})
+
     @app.exception_handler(ResourceNotFound)
-    async def not_found(request,exc): return JSONResponse({'detail':'Resource not found'},status_code=404)
+    async def not_found(request: Request, exc):
+        return error_response(request, 404, 'Resource not found', 'RESOURCE_NOT_FOUND')
 
     @app.exception_handler(RoleDenied)
-    async def forbidden(request,exc): return JSONResponse({'detail':'Organization role does not allow this action'},status_code=403)
+    async def forbidden(request: Request, exc):
+        return error_response(request, 403, 'Organization role does not allow this action', 'ROLE_DENIED')
 
     @app.exception_handler(RequestValidationError)
-    async def invalid(request,exc):
-        if request.scope['path']==ROOT or request.scope['path'].startswith(ROOT+'/'):
-            return JSONResponse({'detail':'Invalid customer request'},status_code=422)
-        return await request_validation_exception_handler(request,exc)
+    async def invalid(request: Request, exc):
+        if request.scope['path'] == ROOT or request.scope['path'].startswith(ROOT + '/'):
+            return error_response(request, 422, 'Invalid customer request', 'VALIDATION_FAILED')
+        return await request_validation_exception_handler(request, exc)
 
     @app.get(ROOT)
     async def organizations(user=Depends(principal)):
@@ -360,8 +487,17 @@ def install_organization_routes(app,cfg,store):
         return data.audit(repo,cursor,limit)
 
     @router.get('/notifications/channels')
-    async def notification_channels(data=Depends(scoped)):
-        return {'items':data.list_notification_channels()}
+    async def notification_channels(limit:int=Query(50,ge=1,le=100),cursor:int=Query(0,ge=0),data=Depends(scoped)):
+        all_channels = data.list_notification_channels()
+        items = all_channels[cursor:cursor+limit]
+        has_more = (cursor + limit) < len(all_channels)
+        return {
+            'items': items,
+            'total': len(all_channels),
+            'cursor': cursor,
+            'next_cursor': cursor + limit if has_more else None,
+            'has_more': has_more
+        }
 
     @router.post('/notifications/channels',dependencies=[Depends(csrf)],status_code=201)
     async def create_notification_channel(body:NotificationChannelCreate,data=Depends(scoped)):
