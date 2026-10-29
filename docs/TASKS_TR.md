@@ -1,12 +1,12 @@
 # VulnForge — tüm iş listesi
 
-28 Ekim 2026 güncellemesi. Kaynak: teknik tasarım belgesi, mevcut çalışma ağacı, gereksinim raporu ve kaynak kodunun müşteri ortamında kalmasını sağlayacak bağlantı modeli.
+29 Ekim 2026 güncellemesi. Kaynak: teknik tasarım belgesi, mevcut çalışma ağacı, gereksinim raporu ve kaynak kodunun müşteri ortamında kalmasını sağlayacak bağlantı modeli.
 
 İşaretli maddeler aşağıdaki kanıt kapsamıyla tamamlandı; boş kutular açık işlerdir. İşaretler bütün ürünün veya canlı ortamın hazır olduğu anlamına gelmez. Öncelikler: P0 gerçek özel repolu kullanıcı almadan önce; P1 ürün pilotunu tamamlamak için; P2 sonraki ürün fazları. Görev grupları arasında bağımlılıklar vardır; numara sırası tek başına uygulama sırası değildir.
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 642 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 659 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -30,8 +30,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-015: Org Admin, Maintainer, Analyst, Viewer/Auditor rollerini uygula.
 - [x] VF-016: Repo, scan, finding, impact, öneri ve export sorgularını organizasyon kapsamına bağla.
 - [x] VF-017: Veritabanında RLS veya eşdeğer izolasyon uygula; uygulama bağlantısının korumayı aşmasını engelle.
-- [ ] VF-018: Kuyruk işleri, cache, dosyalar ve arka plan görevlerinde aynı organizasyon sınırını uygula.
-  İlk bölüm tamamlandı: bağlantı/organizasyon anlık görüntüsü, claim fencing, iptal sonrası yazma engeli, repo/scan kapsamlı worker arayüzü, iş başına istemci/cache ve repo sınırlı GitHub token isteği. Worker DB rolü ve özel advisory namespace'i açık; tam madde tiklenmedi. [Alt kontrol listesi ve kanıt](QUEUE_ISOLATION_TR.md).
+- [x] VF-018: Kuyruk işleri, cache, dosyalar ve arka plan görevlerinde aynı organizasyon sınırını uygula.
+  Bağlantı/organizasyon anlık görüntüsü, claim fencing, iptal sonrası yazma engeli, repo/scan kapsamlı worker arayüzü, iş başına istemci/cache, repo sınırlı GitHub token isteği, ayrı kısıtlı PostgreSQL `WorkerStore` DB rolü + iş kanıtı RLS politikaları ve organizasyon-bazlı (`org:<org_id>`) özel advisory katalog namespace'i tamamlandı. [Alt kontrol listesi ve kanıt](QUEUE_ISOLATION_TR.md).
 - [ ] VF-019: Davet, üyelikten çıkarma ve repo erişimi kaybında oturum/yetkiyi güncelle.
 - [x] VF-020: Ortak admin token'ını müşteri akışından kaldır; ayrı ve denetlenen operatör erişimi oluştur.
 
@@ -92,7 +92,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 ## G. Güvenli düzeltme ve PR — P1
 
 - [x] VF-061: Repo bazlı düzeltme politikası ve açık opt-in ekle; otomatik birleştirmeyi kapalı tut.
-- [ ] VF-062: Paket, mevcut/hedef sürüm, baseline SHA, izinli dosyalar ve gerekli kontrollerle patch planı üret.
+- [x] VF-062: Paket, mevcut/hedef sürüm, baseline SHA, izinli dosyalar ve gerekli kontrollerle patch planı üret.
 - [ ] VF-063: Python ve npm yamalarında manifest/lockfile'ı gerçek paket yöneticisiyle yeniden çözümle.
 - [ ] VF-064: Secret içermeyen, geçici, ağ/dosya/CPU/bellek/süre sınırları olan izole koşucu kur; yönetilen taramalarda da uygula.
 - [ ] VF-065: Unit, integration, build, SAST/SCA tekrar taraması ve envanter farkını kanıt olarak kaydet.
@@ -108,7 +108,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [ ] VF-072: Proje risk özeti, son tarama, kapsam, istihbarat tazeliği ve bağlantı sağlığını göster.
 - [ ] VF-073: Bulgu detayında kanıt, advisory, paket grafı, SHA, geçmiş ve güncelleme alternatiflerini göster.
 - [ ] VF-074: Etkilenen projeler ve öneriler ekranına sahip atama, toplu filtre ve geçmiş karşılaştırması ekle.
-- [ ] VF-075: False positive, kabul edilen risk ve süreli suppression işlemlerini rollere bağla.
+- [x] VF-075: False positive, kabul edilen risk ve süreli suppression işlemlerini rollere bağla.
 - [ ] VF-076: Onay bekleyen, doğrulanan, engellenen ve yayımlanan düzeltmeleri ayrı göster.
 - [ ] VF-077: Kullanıcıların ayarlayabildiği e-posta/Slack/Teams bildirim entegrasyonları oluştur.
 - [ ] VF-078: Bildirim dedup'u, toplulaştırma, kritik risk escalation'ı ve hassas içerik filtrelerini uygula.
@@ -163,9 +163,9 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - Genel yayın: ilgili P0 görevleri, canlı kabul, silme/rotasyon/geri yükleme ve güvenlik incelemesi sonuçlanır. VF-101–110 ilk pilotun zorunlu ön koşulları değildir.
 - Her görev ancak gerekli kod, anlamlı doğrulama, yetki/veri etkisi ve ilgili dokümantasyon birlikte tamamlandığında kapatılır. Canlı kanıt gerektiren görevler mock testle kapatılmaz.
 
-## Tamamlanma kanıtları — 28 Ekim 2026
+## Tamamlanma kanıtları — 29 Ekim 2026
 
-**26/110 madde tamamlandı (VF-001–012, VF-015–017, VF-020/021/026/029/031/037/038/040/054/061/086).** Bu sayı iş maddesi sayımıdır; ürünün hazır olma oranı veya bütün güvenlik kontrollerinin tamamlandığı iddiası değildir. Sıradaki açık iş **VF-013: GitHub ile giriş**. VF-013/014 kodu ve 40 auth protokol testi eklendi; gerçek GitHub App callback kabulü beklediği için kutuları açık kaldı. [Kurulum ve kanıt](GITHUB_LOGIN_TR.md). Kullanıcı HTTPS adresinin henüz olmadığını bildirdi. İlk gerçek OAuth/bağlantı testi iki loopback callback ile yapılabilir; public üretim kurulumu HTTPS bekler. [Yerel hazırlık](USER_NEXT_STEPS_TR.md). Bu dış bağımlılığı beklerken bağımsız VF-015/016 API kontrolleri yerel önizleme kapsamında tamamlandı. VF-017, ayrı non-owner runtime hesapları ve PostgreSQL RLS ile tamamlandı. Toplu uygulama ile VF-020/021/026/029/031/037/038/040/054/061/086 tamamlandı; VF-018/019, Action dağıtımı ve müşteri paneli gibi diğer maddelerde kısmi ilerleme var. [Toplu çalışma kaydı](BATCH_PROGRESS_TR.md).
+**29/110 madde tamamlandı (VF-001–012, VF-015–018, VF-020/021/026/029/031/037/038/040/054/061/062/075/086).** Bu sayı iş maddesi sayımıdır; ürünün hazır olma oranı veya bütün güvenlik kontrollerinin tamamlandığı iddiası değildir. Sıradaki açık iş **VF-013: GitHub ile giriş**. VF-013/014 kodu ve 40 auth protokol testi eklendi; gerçek GitHub App callback kabulü beklediği için kutuları açık kaldı. [Kurulum ve kanıt](GITHUB_LOGIN_TR.md). Kullanıcı HTTPS adresinin henüz olmadığını bildirdi. İlk gerçek OAuth/bağlantı testi iki loopback callback ile yapılabilir; public üretim kurulumu HTTPS bekler. [Yerel hazırlık](USER_NEXT_STEPS_TR.md). Bu dış bağımlılığı beklerken bağımsız VF-015/016 API kontrolleri yerel önizleme kapsamında tamamlandı. VF-017 ve VF-018, ayrı non-owner runtime hesapları (`customer`, `operator`, `worker`), PostgreSQL RLS ve organizasyon-bazlı özel advisory katalog namespace'i ile tamamlandı. Toplu uygulama ile VF-018/020/021/026/029/031/037/038/040/054/061/062/075/086 tamamlandı; VF-019, Action dağıtımı ve müşteri paneli gibi diğer maddelerde kısmi ilerleme var. [Toplu çalışma kaydı](BATCH_PROGRESS_TR.md).
 
 | İşler | Çıktı ve kanıt | Kapsam sınırı |
 |---|---|---|
@@ -175,13 +175,14 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 | VF-009 | [Saklama/silme/yedek politikası](DATA_RETENTION_TR.md); mevcut uninstall temizliği ve testleri | Görev politika tanımıydı. TTL, tenant silme ve yedek silme otomasyonu VF-084/089'da açık. |
 | VF-010 | [Teknik gizlilik taslağı](PRIVACY_NOTICE_DRAFT_TR.md), SECURITY/kurulum güncellemesi, [lisans/veri kaynağı değerlendirmesi](LICENSE_REVIEW_TR.md), kurulu paket envanteri | Ürün lisansı/yasal işletmeci seçilmedi; hukuki yayın onayı ve dağıtılan sürüm incelemesi VF-091/100'de açık. |
 | VF-011 | [Veritabanı taşıma rehberi](DATABASE_MIGRATION_TR.md), iki dialect migration, checksum kontrolü ve SQLite→PostgreSQL aracı; gerçek DB aktarım/rollback/concurrency testleri | Migration/runtime rol ayrımı ve PostgreSQL RLS eklendi; HA ve üretim backup/restore tatbikatı tamamlanmadı. |
-| VF-012 | [Identity modeli](IDENTITY_MODEL_TR.md), kullanıcı/org/üyelik/sahiplik tabloları; son admin ve repo sahiplenme kontrolleri | Kalıcı model tamamlandı; Giriş/oturum kodu yerelde test edildi, canlı kabulü açık; Yeni müşteri API önizlemesinde rol/org sınırı var; PostgreSQL DB sınırı eklendi; worker izolasyonu ve gerçek GitHub ownership doğrulaması açık. |
+| VF-012 | [Identity modeli](IDENTITY_MODEL_TR.md), kullanıcı/org/üyelik/sahiplik tabloları; son admin ve repo sahiplenme kontrolleri | Kalıcı model tamamlandı; Giriş/oturum kodu yerelde test edildi, canlı kabulü açık; Yeni müşteri API önizlemesinde rol/org sınırı var; PostgreSQL DB ve worker sınırı eklendi; gerçek GitHub ownership doğrulaması açık. |
 
-| VF-015–016 | [Rol ve organizasyon erişimi](ORGANIZATION_ACCESS_TR.md); deny-by-default matris, session/CSRF, org kapsamlı repo/finding/scan/impact/öneri/export/audit sorguları; 49 yeni iki-org API testi ve 2 gerçek PostgreSQL kabul testi | Yalnız loopback önizleme; müşteri kapısı default kapalı. PostgreSQL RLS ve runtime hesap ayrımı eklendi. Canlı OAuth, worker/queue ve gerçek kurulum sahipliği tamamlanmadı. |
+| VF-015–016 | [Rol ve organizasyon erişimi](ORGANIZATION_ACCESS_TR.md); deny-by-default matris, session/CSRF, org kapsamlı repo/finding/scan/impact/öneri/export/audit sorguları; 49 yeni iki-org API testi ve 2 gerçek PostgreSQL kabul testi | Yalnız loopback önizleme; müşteri kapısı default kapalı. PostgreSQL RLS ve runtime hesap ayrımı eklendi. Canlı OAuth ve gerçek kurulum sahipliği tamamlanmadı. |
 
-| VF-017 | [PostgreSQL izolasyon rehberi](DATABASE_ISOLATION_TR.md), migration 004, FORCE RLS, ayrı customer/operator runtime, oturum kanıtı ve fail-closed rol/ACL kontrolleri; 44 yeni RLS/parser testi | Gerçek geçici PostgreSQL 14.23; non-superuser migration sahibi ve iki non-owner runtime ile doğrulandı. SQLite RLS sunmaz; worker/queue, canlı kabul ve üretim altyapısı açık. |
+| VF-017 | [PostgreSQL izolasyon rehberi](DATABASE_ISOLATION_TR.md), migration 004, FORCE RLS, ayrı customer/operator runtime, oturum kanıtı ve fail-closed rol/ACL kontrolleri; 44 yeni RLS/parser testi | Gerçek geçici PostgreSQL 14.23; non-superuser migration sahibi ve non-owner runtime'lar ile doğrulandı. SQLite RLS sunmaz; canlı kabul ve üretim altyapısı açık. |
+| VF-018 | [Kuyruk ve worker izolasyonu](QUEUE_ISOLATION_TR.md), migration 005 + 011, `WorkerStore` (`--worker-role`), iş kanıtına bağlı PostgreSQL RLS, `org:<org_id>` özel advisory katalog namespace'i ve legacy karantina | Gerçek geçici PostgreSQL 14.23 ve non-superuser migration sahibiyle doğrulandı; dış ağ/container runtime ayrımı VF-064/081–083'te açık. |
 
-Doğrulama: **642 test geçti, atlanan test yok**. Yeni `scripts/check.py --postgres` kendi geçici yerel PostgreSQL kümesini oluşturup testlerden sonra kapatıp temizledi. Mevcut test kümesi ayrıca kapatıldı. Wheel oluşturuldu; 20 SQL migration, iki HTML ekranı ve CLI giriş noktası kontrol edildi, paketten bağımsız SQLite/CLI açılışı doğrulandı. Action/workflow YAML ve iki ekranın JavaScript sözdizimi kontrol edildi. Müşteri ekranı yalnız sahte iki kuruluş verisiyle yerel tarayıcıda, filtre ve görünüm bakımından incelendi; bu canlı müşteri kabulü değildir. Suite'de bir üçüncü taraf Starlette/httpx deprecation uyarısı var. Hash kilitleriyle temiz kurulum, Docker build ve ağsız/read-only container açılışı geçti. Canlı GitHub/OSV, GitHub Action, trusted runner upload, worker DB izolasyonu ve gerçek iki-müşteri kabulü açık kalır. Yayın yapılmadı. [Kurulum kanıtı](REPRODUCIBLE_SETUP_TR.md).
+Doğrulama: **659 test geçti, atlanan test yok**. Yeni `scripts/check.py --postgres` kendi geçici yerel PostgreSQL kümesini oluşturup testlerden sonra kapatıp temizledi. Mevcut test kümesi ayrıca kapatıldı. Wheel oluşturuldu; 22 SQL migration, iki HTML ekranı ve CLI giriş noktası kontrol edildi, paketten bağımsız SQLite/CLI açılışı doğrulandı. Action/workflow YAML ve iki ekranın JavaScript sözdizimi kontrol edildi. Müşteri ekranı yalnız sahte iki kuruluş verisiyle yerel tarayıcıda, filtre ve görünüm bakımından incelendi; bu canlı müşteri kabulü değildir. Suite'de bir üçüncü taraf Starlette/httpx deprecation uyarısı var. Hash kilitleriyle temiz kurulum, Docker build ve ağsız/read-only container açılışı geçti. Canlı GitHub/OSV, GitHub Action, trusted runner upload ve gerçek iki-müşteri kabulü açık kalır. Yayın yapılmadı. [Kurulum kanıtı](REPRODUCIBLE_SETUP_TR.md).
 
 | Yeni tamamlananlar | Çıktı ve kanıt | Kapsam sınırı |
 |---|---|---|
@@ -191,10 +192,12 @@ Doğrulama: **642 test geçti, atlanan test yok**. Yeni `scripts/check.py --post
 | VF-029 | Bağlantı/claim kontrolü, repo daraltılmış token isteği, job-local cache temizliği, read-only worker yazma kapısı | Canlı token kabulü yapılmadı; fixture/provider sözleşmesi test edildi. |
 | VF-031 | Kurulabilir offline CLI, güvenli descriptor-relative okuma, limits/coverage, metadata-only v1 çıktı | Temel AST/regex ve altı parser; Semgrep/Gitleaks/resolver ayrı açık işlerdir. |
 | VF-040 | Kaynak kopyalamayan CLI/Action; atomik owner-only rapor, iptal/hata cleanup ve sınırlı cleanup komutu | POSIX customer runner; host crash/SIGKILL ephemeral-runner/retention gerektirir. |
-| VF-061 | Org Admin + CSRF ile connection-bound repo opt-in, exact paket/dosya allowlist; merge ve doğrulanmamış yayın engeli | Gerçek patch/build/test/approval/publication VF-062–070'te açık. |
+| VF-061 | Org Admin + CSRF ile connection-bound repo opt-in, exact paket/dosya allowlist; merge ve doğrulanmamış yayın engeli | Gerçek patch/build/test/approval/publication VF-063–070'te açık. |
+| VF-062 | `remediation.py` `build_patch_plan` / `build_patch_plans`: paket, mevcut/hedef sürüm, `major`/`minor`/`patch` sınıfı, 40-hex baseline SHA, manifest SHA-256, izinli dosyalar ve zorunlu kontrollerle deterministik patch planı + audit kaydı | `publication_allowed=False`, `automerge_allowed=False`; izole paket yöneticisi/test koşucusu ve insan onayı VF-063–069'da açık. |
+| VF-075 | `false_positive` (`finding.triage`: Org Admin/Maintainer/Analyst), `risk_accepted` (`finding.accept_risk`: Org Admin/Maintainer, zorunlu <= 366 gün süre sonu) ve `suppressed` (`finding.suppress`) uygulama + PostgreSQL RLS + UI/operator bağlantısı | Süresi dolan `risk_accepted` ve `suppressed` otomatik `open`'a döner; bildirim/SLA eskalasyonu VF-060/077–078'de açık. |
 | VF-037–038 | [Koşucu kimliği ve karantina](RUNNER_IDENTITY_TR.md); PR/fork/dynamic/unknown workflow privilege reddi, v1 şema/1 MB/secret-source filtresi, canonical dedup/replay/conflict ve transaction kanıtı | Gerçek RSA/JWKS fixture ve yerel PostgreSQL; production intake ve baseline promotion kapalı; canlı kabul VF-035/036/094. |
 | VF-054 | [Kanıt tazeliği](EVIDENCE_FRESHNESS_TR.md); 24 saat envanter/1 saat sorgu kanıtı, push/dal/revision invalidation, son başarısız/kısmi tarama, tarihsel öneri ve etkili durum; 59 yeni test | Gerçek geçici PostgreSQL, beş rol, API/export ve transfer; feed sync/cursor, canlı provider/kurulum, current HEAD ve release/test doğrulaması açık. |
-| VF-086 | 60 saniye heartbeat/300 saniye lease, 1800 saniye timeout, retry/backoff/4 deneme, audited single-use dead-letter retry | Ayrı worker DB rolü, adalet/kota ve alarm işletimi açık. |
+| VF-086 | 60 saniye heartbeat/300 saniye lease, 1800 saniye timeout, retry/backoff/4 deneme, audited single-use dead-letter retry | Adalet/kota ve alarm işletimi VF-087/090'da açık. |
 
 ## Referanslar
 

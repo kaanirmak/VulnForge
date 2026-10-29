@@ -76,3 +76,63 @@ def test_policy_api_requires_org_admin_and_csrf(tmp_path):
     response=admin.put(url,json=body,headers=headers)
     assert response.status_code==200 and not response.json()['publication_ready']
     assert store.remediation_policy(repos['alpha']) is not None
+
+
+def test_patch_plan_records_versions_baseline_sha_allowlist_and_required_checks(queue):
+    import json
+    from vulnforge.remediation import REQUIRED_CHECKS, build_patch_plan, build_patch_plans
+    org=own(queue)
+    with queue.conn() as c: admin=c.execute('SELECT id FROM users WHERE github_id=100').fetchone()[0]
+    Identities(queue).set_remediation_policy(
+        org,'alpha/project',admin,True,['requests','urllib3'],['requirements.txt']
+    )
+    policy=queue.remediation_policy('alpha/project')
+    files={'requirements.txt':{'text':'requests==2.27.0\nurllib3==1.26.4\ndjango==4.0.0\n'}}
+    dep_minor=Dependency('requests','2.27.0','PyPI','requirements.txt')
+    dep_major=Dependency('urllib3','1.26.4','PyPI','requirements.txt')
+    dep_unlisted=Dependency('django','4.0.0','PyPI','requirements.txt')
+    dep_other_file=Dependency('requests','2.27.0','PyPI','sub/requirements.txt')
+    adv_minor=[{'id':'PYSEC-2023-74','aliases':['GHSA-j8r2-6x86-q33q'],
+                'affected':[{'package':{'ecosystem':'PyPI','name':'requests'},
+                             'ranges':[{'type':'ECOSYSTEM','events':[{'introduced':'0'},{'fixed':'2.31.0'}]}]}]}]
+    adv_major=[{'id':'GHSA-v845-jxx5-vc9f',
+                'affected':[{'package':{'ecosystem':'PyPI','name':'urllib3'},
+                             'ranges':[{'type':'ECOSYSTEM','events':[{'introduced':'0'},{'fixed':'2.0.7'}]}]}]}]
+    grouped={
+        dep_minor:adv_minor,
+        dep_major:adv_major,
+        dep_unlisted:adv_minor,
+        dep_other_file:adv_minor,
+    }
+    recommendations={
+        dep_minor:{'status':'candidate_verified','recommended_version':'2.31.0'},
+        dep_major:{'status':'candidate_verified','recommended_version':'2.0.7'},
+    }
+    plans=build_patch_plans('alpha/project','main','a'*40,policy,files,grouped,recommendations)
+    assert len(plans)==2
+    minor_plan=next(p for p in plans if p['package']=='requests')
+    major_plan=next(p for p in plans if p['package']=='urllib3')
+    assert minor_plan['current_version']=='2.27.0' and minor_plan['target_version']=='2.31.0'
+    assert minor_plan['upgrade_class']=='minor'
+    assert minor_plan['baseline_sha']=='a'*40 and minor_plan['base_branch']=='main'
+    assert minor_plan['allowed_files']==['requirements.txt']
+    assert minor_plan['advisory_ids']==['GHSA-j8r2-6x86-q33q']
+    assert minor_plan['manifest_sha256']!=minor_plan['patched_manifest_sha256']
+    assert minor_plan['required_checks']==list(REQUIRED_CHECKS)
+    assert minor_plan['status']=='planned_pending_validation'
+    assert minor_plan['publication_allowed'] is False and minor_plan['automerge_allowed'] is False
+    assert 'major_upgrade_requires_explicit_review' not in minor_plan['blockers']
+    assert major_plan['upgrade_class']=='major'
+    assert 'major_upgrade_requires_explicit_review' in major_plan['blockers']
+    with pytest.raises(ValueError):
+        build_patch_plan('alpha/project','main','invalid-sha',policy,files,dep_minor,adv_minor)
+    github=FakeGitHub()
+    agent=Agent(managed_config(enable_auto_pr=True),queue,github,FakeOSV())
+    emitted=asyncio.run(agent.maybe_propose_patches(
+        'alpha/project',11,'main','a'*40,files,grouped,recommendations
+    ))
+    assert len(emitted)==2 and not github.prs
+    event=next(json.loads(a['details']) for a in reversed(queue.list_rows('audit_events'))
+               if a['action']=='remediation_blocked')
+    assert event['plan_count']==2 and event['baseline_sha']=='a'*40
+    assert all(p['publication_allowed'] is False for p in event['plans'])

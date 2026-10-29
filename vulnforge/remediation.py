@@ -45,3 +45,123 @@ def remediation_key(path: str, dep: Dependency, target: str):
 def branch_for(dep: Dependency, key: str):
     safe=re.sub(r'[^a-z0-9-]+','-',dep.name.lower())[:35].strip('-')
     return f'vulnforge/security/{safe}-{key[:10]}'
+
+
+REQUIRED_CHECKS=(
+    'lockfile_resolution',
+    'isolated_build_and_test',
+    'post_patch_sast_sca_rescan',
+    'inventory_diff_verification',
+    'sha_diff_bound_human_approval',
+)
+SHA_PATTERN=re.compile(r'^[0-9a-f]{40}$')
+
+
+def _upgrade_class(current: str, target: str) -> str:
+    try:
+        cur,tgt=Version(current),Version(target)
+        if tgt<=cur or tgt.is_prerelease or cur.is_prerelease: return 'unknown'
+        if tgt.major!=cur.major: return 'major'
+        if tgt.minor!=cur.minor: return 'minor'
+        return 'patch'
+    except InvalidVersion:
+        return 'unknown'
+
+
+def build_patch_plan(repo: str, base_branch: str, baseline_sha: str, policy: dict,
+                     files: dict, dep: Dependency, advisories: list[dict],
+                     recommendation: dict | None = None) -> dict | None:
+    """Create a deterministic metadata-only patch plan; never publishes or merges."""
+    from .db import Store
+    from .intelligence import advisory_identity
+    from .privacy import PrivacyError, path_id
+    if not isinstance(baseline_sha,str) or not SHA_PATTERN.fullmatch(baseline_sha):
+        raise ValueError('Valid 40-character baseline SHA required')
+    if not isinstance(base_branch,str) or not base_branch or any(c.isspace() for c in base_branch):
+        raise ValueError('Valid base branch required')
+    if (not isinstance(policy,dict) or not policy.get('enabled') or policy.get('repo')!=repo or
+        not policy.get('connection_id') or not policy.get('organization_id')):
+        return None
+    normalized=Store.normalize_package(dep.name,dep.ecosystem)
+    allowed_packages=set(policy.get('allowed_packages') or ())
+    allowed_files=set(policy.get('allowed_files') or ())
+    if normalized not in allowed_packages or dep.file_path not in allowed_files:
+        return None
+    try: path_id(dep.file_path)
+    except PrivacyError: return None
+    if dep.file_path.rsplit('/',1)[-1]!='requirements.txt' or any(p.startswith('.') for p in dep.file_path.split('/')):
+        return None
+    target=None
+    if recommendation is not None:
+        if recommendation.get('status')=='candidate_verified':
+            target=recommendation.get('recommended_version')
+    else:
+        target=candidate_version(dep,advisories)
+    try:
+        if target and (Version(target)<=Version(dep.version) or Version(target).is_prerelease):
+            target=None
+    except InvalidVersion:
+        target=None
+    upgrade=_upgrade_class(dep.version,target) if target else 'unknown'
+    file_entry=files.get(dep.file_path) if isinstance(files,dict) else None
+    manifest_text=file_entry.get('text') if isinstance(file_entry,dict) else None
+    manifest_sha256=(hashlib.sha256(manifest_text.encode('utf-8')).hexdigest()
+                     if isinstance(manifest_text,str) else None)
+    patched_sha256=None
+    if isinstance(manifest_text,str) and target:
+        patched=patched_requirement(manifest_text,dep,target)
+        if patched is not None:
+            patched_sha256=hashlib.sha256(patched.encode('utf-8')).hexdigest()
+    blockers=[]
+    if not target:
+        blockers.append('no_verified_target_version')
+    if manifest_sha256 is None:
+        blockers.append('baseline_manifest_unavailable')
+    if patched_sha256 is None:
+        blockers.append('lockfile_resolver_required')
+    if upgrade=='major':
+        blockers.append('major_upgrade_requires_explicit_review')
+    blockers.extend(('isolated_validation_required','bound_human_approval_required'))
+    key=remediation_key(dep.file_path,dep,target or 'unverified')
+    advisory_ids=sorted({advisory_identity(a) for a in advisories if isinstance(a,dict) and a.get('id')})
+    return {
+        'plan_id':key,
+        'repo':repo,
+        'connection_id':policy['connection_id'],
+        'organization_id':policy['organization_id'],
+        'base_branch':base_branch,
+        'baseline_sha':baseline_sha,
+        'ecosystem':dep.ecosystem,
+        'package':dep.name,
+        'normalized_package':normalized,
+        'current_version':dep.version,
+        'target_version':target,
+        'upgrade_class':upgrade,
+        'file_path':dep.file_path,
+        'allowed_files':[dep.file_path],
+        'manifest_sha256':manifest_sha256,
+        'patched_manifest_sha256':patched_sha256,
+        'advisory_ids':advisory_ids,
+        'branch_name':branch_for(dep,key) if target else None,
+        'required_checks':list(REQUIRED_CHECKS),
+        'validation_status':'pending_isolated_execution',
+        'approval_status':'pending_human_approval',
+        'status':'planned_pending_validation' if target and manifest_sha256 else 'blocked',
+        'publication_allowed':False,
+        'automerge_allowed':False,
+        'blockers':blockers,
+    }
+
+
+def build_patch_plans(repo: str, base_branch: str, baseline_sha: str, policy: dict | None,
+                      files: dict, grouped: dict[Dependency,list[dict]],
+                      recommendations: dict[Dependency,dict] | None = None) -> list[dict]:
+    if not policy:
+        return []
+    plans=[]
+    for dep,advisories in sorted(grouped.items(),key=lambda item:(item[0].file_path,item[0].ecosystem,item[0].name,item[0].version)):
+        rec=recommendations.get(dep) if isinstance(recommendations,dict) else None
+        plan=build_patch_plan(repo,base_branch,baseline_sha,policy,files,dep,advisories,rec)
+        if plan is not None:
+            plans.append(plan)
+    return plans

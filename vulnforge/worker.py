@@ -29,13 +29,16 @@ class Agent:
         # The server-populated queue snapshot is authoritative, never payload
         # organization/installation fields. Network waits hold no DB locks.
         from .job import GuardedProvider, JobStore
+        catalog_mode='public'
         if self.cfg.intelligence_mode=='private_osv':
-            from .privacy import PrivacyError
-            raise PrivacyError('Private queued intelligence requires a namespaced advisory catalog')
+            if not job.get('organization_id'):
+                from .privacy import PrivacyError
+                raise PrivacyError('Private queued intelligence requires an organization-namespaced repository')
+            catalog_mode='private_osv'
         original=self.github,self.osv,self.kev
         store=self.store
         check=lambda:store.check_job(job)
-        with store.job_scope(job):
+        with store.job_scope(job,catalog_scope=catalog_mode):
             self.store=JobStore(store,job)
             self.github=GuardedProvider(original[0],check)
             self.osv=GuardedProvider(original[1],check)
@@ -200,14 +203,16 @@ class Agent:
         if not snapshot_sha and await self.github.branch_head(repo,installation_id,default_branch)!=head:
             coverage['issues'].append({'reason':'default_branch_moved'})
         complete=not coverage['issues']
+        default_source='Private OSV' if self.cfg.intelligence_mode=='private_osv' else 'OSV'
         with self.store.transaction():
             if not snapshot_sha and complete:
                 self.store.replace_inventory(repo,deps)
             seen=set()
             impacts={}
             for dep,advisory in affected:
-                canonical=(advisory_identity(advisory) if advisory.get('_evidence_source')=='GitHub webhook'
-                           else self.store.save_advisory(advisory))
+                source_name=advisory.get('_evidence_source',default_source)
+                canonical=(advisory_identity(advisory) if source_name=='GitHub webhook'
+                           else self.store.save_advisory(advisory,source=source_name))
                 if self.store.advisory(canonical)['withdrawn']: continue
                 id_=advisory['id']
                 key='dep:'+hashlib.sha256(f'{dep.file_path}:{dep.ecosystem}:{dep.name}:{dep.version}:{id_}'.encode()).hexdigest()[:32]
@@ -218,14 +223,14 @@ class Agent:
                 severity = 'critical' if kev_match else ('high' if cvss else 'medium')
                 details={'osv_id':id_,'advisory_id':canonical,'aliases':aliases,'package':dep.name,'version':dep.version,
                      'ecosystem':dep.ecosystem,'summary':advisory.get('summary','')[:500],
-                     'reference':(f'https://github.com/advisories/{canonical}' if advisory.get('_evidence_source')=='GitHub webhook'
-                                  else f'https://osv.dev/vulnerability/{id_}'),
+                     'reference':(f'https://github.com/advisories/{canonical}' if source_name=='GitHub webhook'
+                                  else (None if source_name=='Private OSV' else f'https://osv.dev/vulnerability/{id_}')),
                      'known_exploited': bool(kev_match) if kev_entries is not None else None,
                      'kev': kev_match,
                      'priority_note': ('CISA KEV: known exploited in the wild; prioritize review'
                                        if kev_match else 'Severity is a heuristic, not a verified CVSS score'),
                      'impact_status':'affected','reachability':'unknown','scan_id':scan_id,
-                     'source':advisory.get('_evidence_source','OSV'),'observed_at':time.time(),'advisory_modified':advisory.get('modified'),
+                     'source':source_name,'observed_at':time.time(),'advisory_modified':advisory.get('modified'),
                      'advisory_sha256':self.store.advisory(canonical)['source_sha256'],
                      'cvss_vectors':cvss,'epss':None,
                      'update_recommendation':recommendations.get(dep)}
@@ -235,7 +240,7 @@ class Agent:
                 if not snapshot_sha:
                     self.store.save_finding(repo,key,'dependency',severity,title,dep.file_path,head,details)
                 impact=impacts.setdefault(canonical,{'dependencies':[],'recommendations':[],
-                    'source':advisory.get('_evidence_source','OSV')})
+                    'source':source_name})
                 if asdict(dep) not in impact['dependencies']:
                     impact['dependencies'].append(asdict(dep))
                     if dep in recommendations:
@@ -260,17 +265,27 @@ class Agent:
             if self.cfg.enable_auto_pr and not complete and not snapshot_sha:
                 self.store.audit_event(repo,None,'system','remediation_blocked',{'scan_id':scan_id,'reason':'incomplete_inventory'})
         if self.cfg.enable_auto_pr and complete and not snapshot_sha:
-            await self.maybe_propose_patches(repo,installation_id,default_branch,head,files,grouped)
+            await self.maybe_propose_patches(repo,installation_id,default_branch,head,files,grouped,recommendations)
         log.info('Audited %s: %d dependencies; %d affected entries',repo,len(deps),len(affected))
 
     async def maybe_propose_patches(self, repo, install, base, checked_head, files,
-                                    grouped: dict[Dependency,list[dict]]):
+                                    grouped: dict[Dependency,list[dict]], recommendations=None):
+        from .remediation import build_patch_plans
         policy=self.store.remediation_policy(repo)
+        if policy is None:
+            self.store.audit_event(repo,None,'system','remediation_blocked',
+                {'reason':'repository_opt_in_required'})
+            return []
+        plans=build_patch_plans(repo,base,checked_head,policy,files,grouped,recommendations)
         self.store.audit_event(repo,None,'system','remediation_blocked',
-            {'reason':'repository_opt_in_required' if policy is None else 'isolated_validation_and_bound_approval_required'})
+            {'reason':'isolated_validation_and_bound_approval_required',
+             'baseline_sha':checked_head,
+             'plan_count':len(plans),
+             'plans':plans})
         # Repository opt-in is necessary but does not prove resolver/build/test
         # validation or SHA+diff-bound human approval. Keep publication closed
         # until VF-063–069 provide those proofs.
+        return plans
 
 
 async def run_worker():
@@ -281,6 +296,13 @@ async def run_worker():
     if cfg.source_access_allowed and (not cfg.app_id or not cfg.private_key_path):
         raise SystemExit('Configure GITHUB_APP_ID and GITHUB_PRIVATE_KEY_PATH before starting worker')
     store=Store(cfg.database_target,migrate=cfg.database_auto_migrate)
+    worker_store=None
+    if store.backend=='postgresql':
+        if not cfg.worker_database_url:
+            raise SystemExit('Configure WORKER_DATABASE_URL as a least-privilege worker database role before starting a PostgreSQL worker')
+        from .rls import WorkerStore, verify_operator
+        verify_operator(store)
+        worker_store=WorkerStore(cfg.worker_database_url)
     last_schedule=0.0
     while True:
         if time.monotonic()-last_schedule>60:
@@ -290,23 +312,27 @@ async def run_worker():
         if not job:
             await asyncio.sleep(2)
             continue
-        await execute_job(cfg,store,job)
+        await execute_job(cfg,store,job,worker_store=worker_store)
 
 
-async def execute_job(cfg,store,job):
+async def execute_job(cfg,store,job,worker_store=None):
     """No credential, HTTP cookie or advisory cache survives a queue job."""
     from contextlib import AsyncExitStack
+    if worker_store is None and cfg.worker_database_url:
+        from .rls import WorkerStore
+        worker_store=WorkerStore(cfg.worker_database_url)
+    execution_store=worker_store or store
     try:
-        store.check_job(job)
+        execution_store.check_job(job)
         async with AsyncExitStack() as stack:
             github=GitHub(cfg)
             stack.push_async_callback(github.close)
-            github.bind_job(job,lambda:store.check_job(job))
+            github.bind_job(job,lambda:execution_store.check_job(job))
             osv=OSV(cfg.osv_api_url,policy=cfg.metadata_policy())
             stack.push_async_callback(osv.close)
             kev=KEV() if cfg.enable_kev else None
             if kev: stack.push_async_callback(kev.close)
-            await run_leased_job(store,job,Agent(cfg,store,github,osv,kev).process(job))
+            await run_leased_job(execution_store,job,Agent(cfg,execution_store,github,osv,kev).process(job))
         store.finish(job)
     except StaleJob:
         store.discard_job(job)
