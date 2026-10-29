@@ -183,7 +183,76 @@ async def recommend_updates(grouped: dict[Dependency, list[dict]], osv, *, regis
                 verification_source='OSV package/version query',
                 note='No known advisory returned by OSV for this target. Confirm release availability, regenerate lockfiles and run tests before upgrading.')
             pending.pop(dep)
+
+    all_deps = list(grouped.keys())
+    for dep, rec in output.items():
+        enrich_recommendation_context(rec, dep, all_dependencies=all_deps)
     return output
+
+
+def enrich_recommendation_context(rec: dict, dep: Dependency, *, all_dependencies: list[Dependency] | None = None) -> dict:
+    rec['is_direct'] = dep.direct
+    rec['dependency_scope'] = dep.scope
+    target = rec.get('recommended_version')
+
+    # Major upgrade warning
+    if rec.get('upgrade_class') == 'major':
+        rec['major_upgrade'] = True
+        rec['breaking_change_risk'] = 'high'
+        rec['major_upgrade_warning'] = (
+            f"Major upgrade from {dep.version} to {target}; review API deprecations and breaking changes."
+        )
+    else:
+        rec['major_upgrade'] = False
+        rec['breaking_change_risk'] = 'low' if rec.get('upgrade_class') == 'patch' else 'medium'
+
+    # Parent dependencies and override strategy for transitive dependencies
+    if not dep.direct:
+        parent_pkgs = []
+        if all_dependencies:
+            parent_pkgs = sorted({p.name for p in all_dependencies if dep.name in p.dependency_edges})
+        rec['parent_packages'] = parent_pkgs
+        rec['requires_override_or_parent_upgrade'] = True
+        rec['requires_manifest_change'] = False
+
+        if target:
+            if dep.ecosystem == 'npm':
+                rec['override_strategy'] = {
+                    'tool': 'npm/yarn',
+                    'directive': 'overrides',
+                    'snippet': {dep.name: target}
+                }
+            elif dep.ecosystem == 'PyPI':
+                rec['override_strategy'] = {
+                    'tool': 'pip',
+                    'directive': 'constraints',
+                    'snippet': f"{dep.name}=={target}"
+                }
+            elif dep.ecosystem == 'crates.io':
+                rec['override_strategy'] = {
+                    'tool': 'cargo',
+                    'directive': 'patch.crates-io',
+                    'snippet': f"[patch.crates-io]\n{dep.name} = {{ version = \"{target}\" }}"
+                }
+            elif dep.ecosystem == 'Packagist':
+                rec['override_strategy'] = {
+                    'tool': 'composer',
+                    'directive': 'replace',
+                    'snippet': {dep.name: target}
+                }
+            elif dep.ecosystem == 'Go':
+                rec['override_strategy'] = {
+                    'tool': 'go',
+                    'directive': 'replace',
+                    'snippet': f"replace {dep.name} => {dep.name} {target}"
+                }
+    else:
+        rec['parent_packages'] = []
+        rec['requires_override_or_parent_upgrade'] = False
+        rec['requires_manifest_change'] = True if target else False
+        rec['override_strategy'] = None
+
+    return rec
 
 
 def advisory_identity(advisory):
