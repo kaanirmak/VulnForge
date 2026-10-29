@@ -174,15 +174,28 @@ def build_patch_plan(repo: str, base_branch: str, baseline_sha: str, policy: dic
     }
 
 
+def compute_patch_diff_hash(original_files: dict, patched_files: dict) -> str:
+    """Deterministic hash of unified diff / patched modifications."""
+    chunks = []
+    for path in sorted(patched_files.keys()):
+        orig_entry = original_files.get(path)
+        orig_text = orig_entry.get('text') if isinstance(orig_entry, dict) else (orig_entry or "")
+        patched_text = patched_files[path]
+        chunks.append(f"--- a/{path}\n+++ b/{path}\n{orig_text}=>{patched_text}\n")
+    return hashlib.sha256("".join(chunks).encode('utf-8')).hexdigest()
+
+
 def evaluate_publication_gate(
     plan: dict,
     *,
     validation_evidence: dict | None = None,
+    approval: dict | None = None,
     current_head_sha: str | None = None,
+    current_diff_sha256: str | None = None,
     touched_files: list[str] | tuple[str, ...] | None = None,
     policy: dict | None = None
 ) -> dict:
-    """Strict publication gate enforcing validation, safe files, minor/patch only, and head freshness."""
+    """Strict publication gate enforcing validation, bound human approval, safe files, minor/patch only, and head freshness."""
     blockers = []
 
     # 1. Validation check
@@ -210,6 +223,17 @@ def evaluate_publication_gate(
     if plan.get('upgrade_class') == 'major':
         blockers.append('major_upgrade_requires_explicit_review')
 
+    # 5. Bound human approval check
+    if not approval or approval.get('status') != 'approved':
+        blockers.append('bound_human_approval_required')
+    else:
+        if approval.get('baseline_sha') != plan.get('baseline_sha'):
+            blockers.append('approval_baseline_mismatch')
+        if current_diff_sha256 and approval.get('diff_sha256') != current_diff_sha256:
+            blockers.append('approval_diff_mismatch')
+        if not approval.get('user_id'):
+            blockers.append('approval_user_missing')
+
     publication_allowed = len(blockers) == 0
     return {
         'plan_id': plan.get('plan_id'),
@@ -217,6 +241,7 @@ def evaluate_publication_gate(
         'blockers': sorted(set(blockers)),
         'baseline_sha': plan.get('baseline_sha'),
         'current_head_sha': current_head_sha,
+        'approval_status': 'approved' if (approval and approval.get('status') == 'approved' and not any(b.startswith('approval_') for b in blockers)) else 'pending_human_approval',
         'gate_status': 'passed' if publication_allowed else 'halted'
     }
 

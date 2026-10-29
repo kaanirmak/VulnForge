@@ -373,13 +373,16 @@ class Agent:
         gated_plans = []
         for p in plans:
             ev = self.store.get_patch_validation(repo, p['plan_id'])
+            appr = self.store.get_patch_approval(repo, p['plan_id'])
             gate = evaluate_publication_gate(
                 p,
                 validation_evidence=ev,
+                approval=appr,
                 current_head_sha=checked_head,
                 policy=policy
             )
             p['publication_allowed'] = gate['publication_allowed']
+            p['approval_status'] = gate['approval_status']
             p['blockers'] = sorted(set(p.get('blockers', []) + gate['blockers']))
             gated_plans.append(p)
         self.store.audit_event(repo,None,'system','remediation_blocked',

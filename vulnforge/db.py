@@ -865,6 +865,64 @@ class Store:
                 return None
             return json.loads(row['evidence']) if isinstance(row['evidence'], str) else row['evidence']
 
+    def _ensure_patch_approvals_table(self, c):
+        c.execute('''CREATE TABLE IF NOT EXISTS patch_approvals (
+            repo TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            user_id INTEGER NOT NULL,
+            baseline_sha TEXT NOT NULL,
+            diff_sha256 TEXT NOT NULL,
+            approved_at REAL NOT NULL,
+            status TEXT NOT NULL,
+            invalidation_reason TEXT,
+            PRIMARY KEY(repo, plan_id)
+        )''')
+
+    def record_patch_approval(self, repo: str, plan_id: str, user_id: int, baseline_sha: str, diff_sha256: str):
+        now = time.time()
+        with self.transaction(), self.conn() as c:
+            self._ensure_patch_approvals_table(c)
+            c.execute('''INSERT INTO patch_approvals(repo, plan_id, user_id, baseline_sha, diff_sha256, approved_at, status, invalidation_reason)
+                VALUES(?,?,?,?,?,?,?,NULL)
+                ON CONFLICT(repo, plan_id) DO UPDATE SET
+                user_id=excluded.user_id,
+                baseline_sha=excluded.baseline_sha,
+                diff_sha256=excluded.diff_sha256,
+                approved_at=excluded.approved_at,
+                status='approved',
+                invalidation_reason=NULL''',
+                (repo, plan_id, user_id, baseline_sha, diff_sha256, now, 'approved'))
+
+    def get_patch_approval(self, repo: str, plan_id: str) -> dict | None:
+        with self.conn() as c:
+            self._ensure_patch_approvals_table(c)
+            row = c.execute('SELECT * FROM patch_approvals WHERE repo=? AND plan_id=?', (repo, plan_id)).fetchone()
+            return dict(row) if row else None
+
+    def invalidate_patch_approval(self, repo: str, plan_id: str, reason: str):
+        with self.transaction(), self.conn() as c:
+            self._ensure_patch_approvals_table(c)
+            c.execute('UPDATE patch_approvals SET status=?, invalidation_reason=? WHERE repo=? AND plan_id=?',
+                      ('invalidated', reason, repo, plan_id))
+
+    def verify_patch_approval(self, repo: str, plan_id: str, current_baseline_sha: str, current_diff_sha256: str) -> tuple[bool, str | None]:
+        with self.transaction(), self.conn() as c:
+            self._ensure_patch_approvals_table(c)
+            row = c.execute('SELECT * FROM patch_approvals WHERE repo=? AND plan_id=?', (repo, plan_id)).fetchone()
+            if not row:
+                return False, 'no_approval'
+            if row['status'] != 'approved':
+                return False, row['invalidation_reason'] or 'approval_not_active'
+            if row['baseline_sha'] != current_baseline_sha:
+                c.execute('UPDATE patch_approvals SET status=?, invalidation_reason=? WHERE repo=? AND plan_id=?',
+                          ('invalidated', 'baseline_sha_mismatch', repo, plan_id))
+                return False, 'baseline_sha_mismatch'
+            if row['diff_sha256'] != current_diff_sha256:
+                c.execute('UPDATE patch_approvals SET status=?, invalidation_reason=? WHERE repo=? AND plan_id=?',
+                          ('invalidated', 'diff_content_changed', repo, plan_id))
+                return False, 'diff_content_changed'
+            return True, None
+
     def pending_impact(self, repo, advisory_id, delivery):
         advisory=self.advisory(advisory_id)
         state='withdrawn' if advisory['withdrawn'] else 'under_investigation'
