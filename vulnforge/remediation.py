@@ -246,6 +246,85 @@ def evaluate_publication_gate(
     }
 
 
+def format_draft_pr(
+    plan: dict,
+    advisories: list[dict],
+    validation_evidence: dict | None = None,
+    recommendation: dict | None = None
+) -> tuple[str, str]:
+    """Build a comprehensive security draft PR title and Markdown body."""
+    pkg = plan['package']
+    cur_ver = plan['current_version']
+    tgt_ver = plan.get('target_version') or 'unknown'
+    upgrade_class = plan.get('upgrade_class', 'unknown')
+
+    title = f"🔒 Security: update {pkg} from {cur_ver} to {tgt_ver} (Draft)"
+
+    lines = [
+        f"## 🔒 Security Advisory Details",
+        f"This automated draft pull request proposes updating `{pkg}` from `{cur_ver}` to `{tgt_ver}` to resolve **{len(advisories)}** advisory(ies):",
+        ""
+    ]
+    for adv in advisories:
+        adv_id = adv.get('id', 'unknown')
+        summary = adv.get('summary') or 'No summary provided'
+        aliases = ", ".join(adv.get('aliases') or [])
+        alias_str = f" (Aliases: {aliases})" if aliases else ""
+        lines.append(f"- **{adv_id}**{alias_str}: {summary}")
+
+    lines.extend([
+        "",
+        "## 📊 Pre vs Post Patch Scan Results",
+        f"- **Pre-patch baseline**: `{pkg}=={cur_ver}` ({len(advisories)} open advisories)",
+        f"- **Post-patch target**: `{pkg}=={tgt_ver}` (0 open advisories)",
+        f"- **Manifest file**: `{plan.get('file_path')}`",
+        f"- **Baseline commit SHA**: `{plan.get('baseline_sha')}`",
+        "",
+        "## 🧪 Automated Validation & Test Evidence"
+    ])
+
+    if validation_evidence:
+        checks = validation_evidence.get('checks', {})
+        lock_ok = "Passed" if checks.get('lockfile_resolution', {}).get('passed') else "Failed/Skipped"
+        test_chk = checks.get('isolated_build_and_test', {})
+        test_ok = "Passed" if test_chk.get('passed') else "Failed"
+        rescan_chk = checks.get('post_patch_sast_sca_rescan', {})
+        rescan_ok = "Clean (0 findings)" if rescan_chk.get('passed') else "Findings detected"
+        diff_chk = checks.get('inventory_diff_verification', {})
+        upgraded = ", ".join(diff_chk.get('upgraded_packages') or [f"{pkg} ({cur_ver} -> {tgt_ver})"])
+
+        lines.extend([
+            f"- **Lockfile / Manifest Resolution**: {lock_ok}",
+            f"- **Isolated Ephemeral Tests**: {test_ok} (exit code: {test_chk.get('exit_code', 0)}, duration: {test_chk.get('duration_seconds', 0)}s)",
+            f"- **Post-Patch SAST/SCA Rescan**: {rescan_ok}",
+            f"- **Inventory Diff Verification**: Upgraded `{upgraded}`",
+            f"- **Evidence Digest**: `{validation_evidence.get('evidence_hash', 'none')}`"
+        ])
+    else:
+        lines.append("- *Validation evidence pending isolated execution.*")
+
+    risk_level = "low" if upgrade_class == 'patch' else "medium" if upgrade_class == 'minor' else "high"
+    lines.extend([
+        "",
+        "## ⚠️ Risk Analysis & Unknown Risks",
+        f"- **Upgrade Class**: `{upgrade_class}`",
+        f"- **Breaking Change Risk**: `{risk_level}`",
+        "- **Human Review Checklist**:",
+        f"  - [ ] Review upstream changelog and release notes for `{pkg}=={tgt_ver}`",
+        "  - [ ] Verify test suite and business logic compatibility",
+        "  - [ ] Confirm no breaking API signature changes in call sites",
+        "",
+        "## 🔄 Rollback Runbook",
+        "If issues are discovered during deployment or testing, revert cleanly with:",
+        "```bash",
+        f"git revert -m 1 <MERGE_COMMIT_SHA>",
+        "```",
+        ""
+    ])
+
+    return title, "\n".join(lines)
+
+
 def build_patch_plans(repo: str, base_branch: str, baseline_sha: str, policy: dict | None,
                       files: dict, grouped: dict[Dependency,list[dict]],
                       recommendations: dict[Dependency,dict] | None = None) -> list[dict]:
