@@ -27,11 +27,20 @@ class ReportDependency(MetadataModel):
     version: str = Field(min_length=1,max_length=128)
     ecosystem: Ecosystem
     path_id: PathID
+    direct: bool = True
+    scope: Literal['runtime','dev','build','test'] = 'runtime'
+    dependency_edges: list[str] = Field(default_factory=list)
+    digest: str | None = Field(default=None, max_length=256)
+    commit: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode='after')
     def identity(self):
         safe_metadata(self.name)
         safe_metadata(self.version)
+        if self.digest:
+            safe_metadata(self.digest)
+        if self.commit:
+            safe_metadata(self.commit)
         patterns={
             'PyPI':r'[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?',
             'npm':r'(?:@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*',

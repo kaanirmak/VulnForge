@@ -13,6 +13,33 @@ class Dependency:
     version: str
     ecosystem: str
     file_path: str
+    direct: bool = True
+    scope: str = 'runtime'  # 'runtime', 'dev', 'build', 'test'
+    dependency_edges: tuple[str, ...] = ()
+    digest: str | None = None
+    commit: str | None = None
+
+    def __init__(
+        self,
+        name: str,
+        version: str,
+        ecosystem: str,
+        file_path: str,
+        direct: bool = True,
+        scope: str = 'runtime',
+        dependency_edges: tuple[str, ...] | list[str] = (),
+        digest: str | None = None,
+        commit: str | None = None,
+    ):
+        object.__setattr__(self, 'name', name)
+        object.__setattr__(self, 'version', version)
+        object.__setattr__(self, 'ecosystem', ecosystem)
+        object.__setattr__(self, 'file_path', file_path)
+        object.__setattr__(self, 'direct', bool(direct))
+        object.__setattr__(self, 'scope', scope if scope in ('runtime', 'dev', 'build', 'test') else 'runtime')
+        object.__setattr__(self, 'dependency_edges', tuple(dependency_edges or ()))
+        object.__setattr__(self, 'digest', digest)
+        object.__setattr__(self, 'commit', commit)
 
 
 def join_continued_lines(content: str) -> list[tuple[int, str]]:
@@ -196,9 +223,10 @@ def parse_manifest(path: str, content: str, *, include_resolver=None, _visited=N
     name = path.rsplit('/', 1)[-1]
     packages: list[Dependency] = []
 
-    def add(pkg, ver, eco):
+    def add(pkg, ver, eco, direct=True, scope='runtime', edges=(), digest=None, commit=None):
         if isinstance(pkg,str) and isinstance(ver,str) and pkg and ver:
-            packages.append(Dependency(pkg,ver,eco,path))
+            packages.append(Dependency(pkg,ver,eco,path,direct=direct,scope=scope,
+                                       dependency_edges=edges,digest=digest,commit=commit))
 
     if name == 'requirements.txt' or name.endswith('.txt') or name.endswith('.in'):
         visited = set(_visited or ())
@@ -233,14 +261,21 @@ def parse_manifest(path: str, content: str, *, include_resolver=None, _visited=N
                 continue
             pkg = entry.get('name') or key.split('node_modules/')[-1]
             if entry.get('version') and not entry.get('link'):
-                add(pkg,entry['version'],'npm')
+                is_direct = (key.count('node_modules/') == 1)
+                sc = 'dev' if entry.get('dev') else 'runtime'
+                edges = tuple(entry.get('dependencies', {}).keys())
+                dig = entry.get('integrity')
+                add(pkg, entry['version'], 'npm', direct=is_direct, scope=sc, edges=edges, digest=dig)
         # Old lockfile v1: recursively walk dependency tree.
         if not obj.get('packages'):
-            def walk(deps):
+            def walk(deps, direct=True):
                 for pkg, info in deps.items():
                     if isinstance(info,dict):
-                        add(pkg,info.get('version'),'npm')
-                        walk(info.get('dependencies',{}))
+                        sc = 'dev' if info.get('dev') else 'runtime'
+                        edges = tuple(info.get('dependencies', {}).keys())
+                        dig = info.get('integrity')
+                        add(pkg, info.get('version'), 'npm', direct=direct, scope=sc, edges=edges, digest=dig)
+                        walk(info.get('dependencies',{}), direct=False)
             walk(obj.get('dependencies',{}))
     elif name in ('pnpm-lock.yaml', 'pnpm-lock.yml'):
         p_deps, _ = parse_pnpm_lock(path, content)
@@ -251,34 +286,59 @@ def parse_manifest(path: str, content: str, *, include_resolver=None, _visited=N
     elif name == 'poetry.lock':
         obj = tomllib.loads(content)
         for item in obj.get('package',[]):
-            add(item.get('name'),item.get('version'),'PyPI')
+            sc = 'dev' if item.get('category') == 'dev' else 'runtime'
+            edges = tuple(item.get('dependencies', {}).keys())
+            files = item.get('files', [])
+            dig = files[0].get('hash') if (files and isinstance(files[0], dict)) else None
+            add(item.get('name'), item.get('version'), 'PyPI', direct=True, scope=sc, edges=edges, digest=dig)
     elif name == 'uv.lock':
         obj = tomllib.loads(content)
         for item in obj.get('package',[]):
             if item.get('name') and item.get('version'):
-                add(item['name'], item['version'], 'PyPI')
+                edges = tuple(d.get('name') for d in item.get('dependencies', []) if isinstance(d, dict) and d.get('name'))
+                sdist = item.get('sdist', {}) if isinstance(item.get('sdist'), dict) else {}
+                wheels = item.get('wheels', [])
+                dig = sdist.get('hash') or (wheels[0].get('hash') if (wheels and isinstance(wheels[0], dict)) else None)
+                add(item['name'], item['version'], 'PyPI', direct=True, scope='runtime', edges=edges, digest=dig)
     elif name == 'Pipfile.lock':
         obj = json.loads(content)
         for section in ('default', 'develop'):
+            sc = 'dev' if section == 'develop' else 'runtime'
             for pkg, info in obj.get(section, {}).items():
                 ver = info.get('version', '')
                 if ver.startswith('=='):
                     ver = ver[2:]
                 if ver:
-                    add(pkg, ver, 'PyPI')
+                    hashes = info.get('hashes', [])
+                    dig = hashes[0] if hashes else None
+                    add(pkg, ver, 'PyPI', direct=True, scope=sc, edges=(), digest=dig)
     elif name == 'Cargo.lock':
         obj = tomllib.loads(content)
         for item in obj.get('package',[]):
             source = item.get('source', '')
             if source.startswith('registry+') or source.startswith('git+'):
-                add(item.get('name'),item.get('version'),'crates.io')
+                edges = tuple(item.get('dependencies', []))
+                dig = item.get('checksum')
+                com = source.split('#')[-1] if ('#' in source and source.startswith('git+')) else None
+                add(item.get('name'), item.get('version'), 'crates.io', direct=True, scope='runtime', edges=edges, digest=dig, commit=com)
     elif name == 'composer.lock':
         obj = json.loads(content)
-        for item in obj.get('packages',[])+obj.get('packages-dev',[]):
+        for item in obj.get('packages',[]):
             dist = item.get('dist', {}) if isinstance(item.get('dist'), dict) else {}
             source = item.get('source', {}) if isinstance(item.get('source'), dict) else {}
             if dist.get('type') != 'path' and source.get('type') != 'path':
-                add(item.get('name'),str(item.get('version','')).lstrip('v'),'Packagist')
+                edges = tuple(item.get('require', {}).keys())
+                dig = dist.get('shasum') or dist.get('reference')
+                com = source.get('reference') if source.get('type') == 'git' else None
+                add(item.get('name'), str(item.get('version','')).lstrip('v'), 'Packagist', direct=True, scope='runtime', edges=edges, digest=dig, commit=com)
+        for item in obj.get('packages-dev',[]):
+            dist = item.get('dist', {}) if isinstance(item.get('dist'), dict) else {}
+            source = item.get('source', {}) if isinstance(item.get('source'), dict) else {}
+            if dist.get('type') != 'path' and source.get('type') != 'path':
+                edges = tuple(item.get('require', {}).keys())
+                dig = dist.get('shasum') or dist.get('reference')
+                com = source.get('reference') if source.get('type') == 'git' else None
+                add(item.get('name'), str(item.get('version','')).lstrip('v'), 'Packagist', direct=True, scope='dev', edges=edges, digest=dig, commit=com)
     elif name == 'go.sum':
         for line in content.splitlines():
             line = line.strip()
@@ -288,7 +348,8 @@ def parse_manifest(path: str, content: str, *, include_resolver=None, _visited=N
             if len(parts) >= 2:
                 mod, raw_ver = parts[0], parts[1]
                 if not raw_ver.endswith('/go.mod'):
-                    add(mod, raw_ver, 'Go')
+                    dig = parts[2] if len(parts) >= 3 else None
+                    add(mod, raw_ver, 'Go', direct=True, scope='runtime', edges=(), digest=dig)
     elif name == 'go.mod':
         in_block=False
         for line in content.splitlines():

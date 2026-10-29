@@ -334,6 +334,79 @@ def test_go_sum_rust_workspace_git_and_composer_source_isolation():
     assert any(i.get("reason") == "unresolved_or_local_package" and i.get("package") == "local/custom-lib" for i in comp_inv.issues)
 
 
+def test_dependency_model_evidence_attributes():
+    from vulnforge.dependencies import Dependency, parse_manifest
+    from vulnforge.runner_report import ReportDependency
+
+    # 1. Direct Dependency instantiation and immutable properties
+    d = Dependency("requests", "2.31.0", "PyPI", "requirements.txt",
+                   direct=True, scope="runtime",
+                   dependency_edges=["urllib3", "certifi"],
+                   digest="sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                   commit=None)
+    assert d.name == "requests"
+    assert d.direct is True
+    assert d.scope == "runtime"
+    assert d.dependency_edges == ("urllib3", "certifi")
+    assert d.digest.startswith("sha256:")
+
+    # 2. ReportDependency validation and roundtrip
+    rd = ReportDependency(name="requests", version="2.31.0", ecosystem="PyPI",
+                          path_id="sha256:" + "a" * 64,
+                          direct=True, scope="runtime",
+                          dependency_edges=["urllib3", "certifi"],
+                          digest="sha256:" + "b" * 64)
+    dumped = rd.model_dump()
+    assert dumped["direct"] is True
+    assert dumped["scope"] == "runtime"
+    assert dumped["dependency_edges"] == ["urllib3", "certifi"]
+    assert dumped["digest"] == "sha256:" + "b" * 64
+
+    # 3. Cargo.lock evidence extraction (edges, digest, commit)
+    cargo_lock = (
+        'version = 3\n\n'
+        '[[package]]\n'
+        'name = "git-lib"\n'
+        'version = "1.0.0"\n'
+        'source = "git+https://github.com/foo/bar?rev=abcdef#0123456789abcdef0123456789abcdef01234567"\n'
+        'dependencies = ["serde", "tokio"]\n'
+    )
+    c_deps = parse_manifest("Cargo.lock", cargo_lock)
+    assert len(c_deps) == 1
+    assert c_deps[0].commit == "0123456789abcdef0123456789abcdef01234567"
+    assert c_deps[0].dependency_edges == ("serde", "tokio")
+
+    # 4. package-lock.json direct vs transitive and dev scope
+    npm_lock = json.dumps({
+        "name": "test-app",
+        "lockfileVersion": 3,
+        "packages": {
+            "": {"name": "test-app"},
+            "node_modules/jest": {
+                "version": "29.7.0",
+                "dev": True,
+                "integrity": "sha512-jest-hash",
+                "dependencies": {"chalk": "^4.0.0"}
+            },
+            "node_modules/jest/node_modules/chalk": {
+                "version": "4.1.2",
+                "dev": True,
+                "integrity": "sha512-chalk-hash"
+            }
+        }
+    })
+    npm_deps = parse_manifest("package-lock.json", npm_lock)
+    npm_by_name = {d.name: d for d in npm_deps}
+    assert npm_by_name["jest"].direct is True
+    assert npm_by_name["jest"].scope == "dev"
+    assert npm_by_name["jest"].digest == "sha512-jest-hash"
+    assert npm_by_name["jest"].dependency_edges == ("chalk",)
+
+    assert npm_by_name["chalk"].direct is False
+    assert npm_by_name["chalk"].scope == "dev"
+    assert npm_by_name["chalk"].digest == "sha512-chalk-hash"
+
+
 def test_incomplete_audit_cannot_resolve_old_findings_or_replace_inventory(tmp_path):
     async def run():
         store=Store(str(tmp_path/'db'))

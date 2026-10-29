@@ -6,7 +6,7 @@
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 675 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 676 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -75,7 +75,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `package-lock.json` workspace linkleri ve npm alias çözümlemesi, `pnpm-lock.yaml` (v5/v6/v9 scoped, peer deps, link tespiti) ve `yarn.lock` (v1 ve v2/Berry resolution/portal kontrolleri) saf Python parser'ları ile CLI ve envanter motoruna eklendi.
 - [x] VF-047: Go build listesi, Rust workspace/git ve Composer paket kaynaklarını doğru ayır; çözümleyicileri yalnız izole ortamda çalıştır.
   `go.sum` kriptografik hash doğrulama satırları desteği, Rust `Cargo.lock` registry/git/workspace ayrımı ve `composer.lock` path/git kaynak izolasyonu saf statik ayrıştırma ve denetim kurallarıyla tamamlandı.
-- [ ] VF-048: Doğrudan/dolaylı, runtime/dev, dependency edge ve commit/digest kanıtlarını modele ekle.
+- [x] VF-048: Doğrudan/dolaylı, runtime/dev, dependency edge ve commit/digest kanıtlarını modele ekle.
+  `Dependency` ve `ReportDependency` modellerine `direct`, `scope`, `dependency_edges`, `digest` ve `commit` kanıt alanları geriye dönük uyumlu biçimde eklendi; npm, Rust Cargo, Composer, Go sum, uv, Pipfile ve Poetry lockfile ayrıştırıcıları kanıtları toplayacak şekilde güncellendi.
 - [ ] VF-049: CycloneDX/SARIF çıktısını resmi şemalarla doğrula; gerekli SPDX/VEX ve envanter farkı çıktısını ekle.
 - [ ] VF-050: Her parser/kural için pozitif-negatif fixture; büyük/bozuk dosya, symlink, submodule ve kapsam testlerini genişlet.
 

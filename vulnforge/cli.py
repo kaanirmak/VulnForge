@@ -140,8 +140,12 @@ def scan(root,repo,sha,kind='code'):
                             result=inventory_manifest(relative,text)
                             for dep in result.dependencies:
                                 try:
+                                    sc = dep.scope if dep.scope in ('runtime', 'dev', 'build', 'test') else 'runtime'
                                     record=ReportDependency(name=dep.name,version=dep.version,
-                                        ecosystem=dep.ecosystem,path_id=pseudonym)
+                                        ecosystem=dep.ecosystem,path_id=pseudonym,
+                                        direct=dep.direct,scope=sc,
+                                        dependency_edges=list(dep.dependency_edges),
+                                        digest=dep.digest,commit=dep.commit)
                                 except ValueError:
                                     reason('unresolved_dependency');continue
                                 dependencies.append(record.model_dump())
