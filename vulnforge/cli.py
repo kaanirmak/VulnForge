@@ -16,7 +16,7 @@ from .privacy import path_id
 from .runner_report import RunnerReport,ReportDependency,parse_report
 from .scanner import scan_code,to_runner_finding
 
-MANIFESTS=frozenset(('requirements.txt','package-lock.json','poetry.lock','Cargo.lock','composer.lock','go.mod'))
+MANIFESTS=frozenset(('requirements.txt','package-lock.json','poetry.lock','Cargo.lock','composer.lock','go.mod','uv.lock','Pipfile.lock'))
 CODE_SUFFIXES=('.py','.js','.jsx','.ts','.tsx','.env','.json','.yaml','.yml','.toml')
 EXCLUDED=frozenset(('.git','.hg','.svn','node_modules','.venv','venv','__pycache__','.tox'))
 MAX_FILE_BYTES=300_000
@@ -100,7 +100,7 @@ def scan(root,repo,sha,kind='code'):
                         continue
                     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
                         total+=1;skipped+=1;reason('content_unavailable');continue
-                    selected=(item.name in MANIFESTS if kind=='dependencies' else
+                    selected=((item.name in MANIFESTS or (item.name.startswith('requirements') and item.name.endswith('.txt'))) if kind=='dependencies' else
                               item.name.endswith(CODE_SUFFIXES))
                     if not selected: continue
                     total+=1

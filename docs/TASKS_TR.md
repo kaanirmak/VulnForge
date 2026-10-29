@@ -6,7 +6,7 @@
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 671 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 673 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -69,7 +69,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-042: Gitleaks adapter'ını ekle; sır değerlerini bulgu, log ve export'lardan çıkar.
 - [x] VF-043: Scanner sonuçlarını ortak bulgu/fingerprint şemasına normalize et.
 - [x] VF-044: PR base/head karşılaştırmasıyla yeni ve önceden mevcut bulguları ayır.
-- [ ] VF-045: Python için extras/marker/include ve çözümlenmiş dolaylı bağımlılıkları güvenilir biçimde envantere al.
+- [x] VF-045: Python için extras/marker/include ve çözümlenmiş dolaylı bağımlılıkları güvenilir biçimde envantere al.
+  PEP 508 extras/markers ayrıştırma, hash ve satır devamı temizleme, `-r`/`-c` özyinelemeli include desteği, `uv.lock` ve `Pipfile.lock` tam çözümlenmiş envanter ayrıştırma ve yerel/git bağımlılık doğrulamaları tamamlandı.
 - [ ] VF-046: npm workspaces/alias/link, pnpm ve Yarn kilit dosyalarını destekle.
 - [ ] VF-047: Go build listesi, Rust workspace/git ve Composer paket kaynaklarını doğru ayır; çözümleyicileri yalnız izole ortamda çalıştır.
 - [ ] VF-048: Doğrudan/dolaylı, runtime/dev, dependency edge ve commit/digest kanıtlarını modele ekle.

@@ -105,6 +105,86 @@ def test_complete_snapshot_has_digest_and_resolves_old_findings(tmp_path):
     asyncio.run(run())
 
 
+def test_python_extras_markers_continuations_and_includes():
+    from vulnforge.dependencies import parse_manifest, inventory_manifest, Dependency
+    content = (
+        '# Base requirements\n'
+        'requests[security,socks]==2.31.0 \\\n'
+        '    --hash=sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\n'
+        'urllib3==2.2.3 ; python_version >= "3.11" and sys_platform == "linux"\n'
+        '-r nested/extra.txt\n'
+    )
+    nested_content = (
+        'certifi==2024.7.4\n'
+        'charset-normalizer[unicode]==3.3.2\n'
+    )
+    def resolver(rel_path):
+        if rel_path in ('nested/extra.txt', 'app/nested/extra.txt'):
+            return nested_content
+        return None
+
+    # Parse with include resolver
+    deps = parse_manifest('app/requirements.txt', content, include_resolver=resolver)
+    names = {d.name: d.version for d in deps}
+    assert names['requests'] == '2.31.0'
+    assert names['urllib3'] == '2.2.3'
+    assert names['certifi'] == '2024.7.4'
+    assert names['charset-normalizer'] == '3.3.2'
+
+    # Inventory without resolver reports unresolved_include
+    result_no_resolver = inventory_manifest('app/requirements.txt', content)
+    assert any(i.get('reason') == 'unresolved_include' and i.get('target') == 'nested/extra.txt'
+               for i in result_no_resolver.issues)
+
+    # Inventory with resolver includes all resolved packages
+    result_with_resolver = inventory_manifest('app/requirements.txt', content, include_resolver=resolver)
+    res_names = {d.name: d.version for d in result_with_resolver.dependencies}
+    assert res_names['requests'] == '2.31.0'
+    assert res_names['certifi'] == '2024.7.4'
+
+
+def test_uv_lock_and_pipfile_lock_resolved_inventories():
+    from vulnforge.dependencies import parse_manifest, inventory_manifest
+    uv_content = (
+        'version = 1\n'
+        'revision = 1\n\n'
+        '[[package]]\n'
+        'name = "fastapi"\n'
+        'version = "0.115.0"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+        'dependencies = [{ name = "pydantic" }]\n\n'
+        '[[package]]\n'
+        'name = "pydantic"\n'
+        'version = "2.9.2"\n'
+        'source = { registry = "https://pypi.org/simple" }\n'
+    )
+    uv_deps = parse_manifest('uv.lock', uv_content)
+    assert len(uv_deps) == 2
+    uv_inv = inventory_manifest('uv.lock', uv_content)
+    assert len(uv_inv.dependencies) == 2
+    assert uv_inv.issues == []
+
+    pipfile_content = json.dumps({
+        '_meta': {'hash': {'sha256': '1234'}},
+        'default': {
+            'requests': {'version': '==2.31.0', 'hashes': ['sha256:1111']}
+        },
+        'develop': {
+            'pytest': {'version': '==8.3.3', 'hashes': ['sha256:2222']}
+        }
+    })
+    pf_deps = parse_manifest('Pipfile.lock', pipfile_content)
+    assert len(pf_deps) == 2
+    pf_inv = inventory_manifest('Pipfile.lock', pipfile_content)
+    assert len(pf_inv.dependencies) == 2
+    assert pf_inv.issues == []
+
+    # Local/git package in uv.lock is caught
+    bad_uv = uv_content + '\n[[package]]\nname = "local-pkg"\nversion = "0.1.0"\nsource = { path = "../local" }\n'
+    bad_uv_inv = inventory_manifest('uv.lock', bad_uv)
+    assert any(i.get('reason') == 'unresolved_local_or_git_package' for i in bad_uv_inv.issues)
+
+
 def test_incomplete_audit_cannot_resolve_old_findings_or_replace_inventory(tmp_path):
     async def run():
         store=Store(str(tmp_path/'db'))
