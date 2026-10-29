@@ -7,7 +7,7 @@ import pytest
 from support import managed_config as Config
 from vulnforge.db import Store
 from vulnforge.dependencies import Dependency
-from vulnforge.intelligence import in_github_range, recommend_updates
+from vulnforge.intelligence import compare_versions, in_github_range, in_osv_range, recommend_updates
 from vulnforge.worker import Agent
 from test_agent import FakeGitHub, FakeOSV
 from test_requirements import LockGitHub, CleanOSV
@@ -368,3 +368,28 @@ def test_ghsa_and_osv_cross_alias_linking_and_revision_history(tmp_path):
     assert store.advisory('CVE-2026-4242')['withdrawn']==1
     assert store.list_rows('findings')[0]['status']=='resolved'
     assert all(i['state']=='withdrawn' for i in store.list_impacts(advisory_id='CVE-2026-4242')['items'])
+
+
+def test_ecosystem_version_comparators_and_osv_github_ranges_keep_unsupported_unknown():
+    assert compare_versions('1.2.3','1.2.4','PyPI')==-1
+    assert compare_versions('1!1.0.0','2.0.0','PyPI')==1
+    assert compare_versions('v1.2.3.4','1.2.3.4','Packagist')==0
+    assert compare_versions('2.1.0.1','2.1.0.0','NuGet')==1
+    assert compare_versions('7.0.8.1','7.0.8','RubyGems')==1
+    assert compare_versions('3.1.2','3.1.10','Maven')==-1
+    assert compare_versions('1.0.0-alpha.1','1.0.0','npm') is None
+    assert compare_versions('1.0.0','1.0.0','UnsupportedEco') is None
+
+    assert in_github_range('1.0.2','npm','>= 1.0.0, < 1.0.5, != 1.0.2') is False
+    assert in_github_range('1.0.3','npm','>= 1.0.0, < 1.0.5, != 1.0.2') is True
+    assert in_github_range('v1.4.2.1','Packagist','>= 1.4.0, < 1.4.3') is True
+    assert in_github_range('7.0.4.2','RubyGems','>= 7.0.0, <= 7.0.4.2') is True
+    assert in_github_range('1.0.0','npm','~1.0.0') is None
+
+    semver_ranges=[{'type':'SEMVER','events':[{'introduced':'1.0.0'},{'fixed':'1.2.0'},{'introduced':'1.4.0'},{'last_affected':'1.4.2'}]}]
+    assert in_osv_range('1.1.0','npm',semver_ranges) is True
+    assert in_osv_range('1.3.0','npm',semver_ranges) is False
+    assert in_osv_range('1.4.2','npm',semver_ranges) is True
+    assert in_osv_range('1.4.3','npm',semver_ranges) is False
+    assert in_osv_range('1.3.0','npm',[{'type':'GIT','events':[{'introduced':'0'}]}]) is None
+    assert in_osv_range('1.3.0-rc1','npm',semver_ranges) is None

@@ -8,18 +8,43 @@ from .dependencies import Dependency
 
 def version_key(version: str, ecosystem: str):
     """Only compare version schemes understood here; ambiguity is not an upgrade."""
+    if not isinstance(version, str) or not version.strip():
+        raise ValueError('Empty version')
     if ecosystem == 'PyPI':
         parsed = Version(version)
         if parsed.is_prerelease or parsed.is_devrelease or parsed.local:
             raise ValueError('Unstable or local version')
         return parsed
-    if ecosystem not in ('npm', 'Go', 'crates.io', 'Packagist'):
-        raise ValueError('Unsupported ecosystem comparator')
-    pattern = r'(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?'
-    match = re.fullmatch(('v' if ecosystem == 'Go' else '') + pattern, version)
-    if not match:
-        raise ValueError('Unsupported release version')
-    return tuple(int(value) for value in match.groups())
+    if ecosystem in ('npm', 'Go', 'crates.io'):
+        pattern = r'(\d+)\.(\d+)\.(\d+)(?:\+[0-9A-Za-z.-]+)?'
+        match = re.fullmatch(('v' if ecosystem == 'Go' else '') + pattern, version)
+        if not match:
+            raise ValueError('Unsupported release version')
+        a, b, c = (int(value) for value in match.groups())
+        return (a, b, c, 0)
+    if ecosystem == 'Packagist':
+        match = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:\+[0-9A-Za-z.-]+)?', version)
+        if not match:
+            raise ValueError('Unsupported release version')
+        parts = [int(v) if v is not None else 0 for v in match.groups()]
+        return tuple(parts)
+    if ecosystem in ('RubyGems', 'NuGet', 'Maven'):
+        match = re.fullmatch(r'(\d+)\.(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\+[0-9A-Za-z.-]+)?', version)
+        if not match:
+            raise ValueError('Unsupported release version')
+        parts = [int(v) if v is not None else 0 for v in match.groups()]
+        return tuple(parts)
+    raise ValueError('Unsupported ecosystem comparator')
+
+
+def compare_versions(left: str, right: str, ecosystem: str) -> int | None:
+    """Compare two versions within an ecosystem; return -1, 0, 1, or None if unknown."""
+    try:
+        lk = version_key(left, ecosystem)
+        rk = version_key(right, ecosystem)
+    except (InvalidVersion, ValueError, TypeError):
+        return None
+    return -1 if lk < rk else (1 if lk > rk else 0)
 
 
 def package_key(name, ecosystem):
@@ -136,7 +161,7 @@ def advisory_identity(advisory):
 
 
 GITHUB_ECOSYSTEMS = {'pip':'PyPI','npm':'npm','go':'Go','rust':'crates.io',
-                     'composer':'Packagist','rubygems':'RubyGems','nuget':'NuGet'}
+                     'composer':'Packagist','rubygems':'RubyGems','nuget':'NuGet','maven':'Maven'}
 
 
 def in_github_range(version, ecosystem, expression):
@@ -144,24 +169,94 @@ def in_github_range(version, ecosystem, expression):
     if not isinstance(expression,str) or not expression.strip() or len(expression)>1000:
         return None
     try: current=version_key(version,ecosystem)
-    except (ValueError,InvalidVersion): return None
+    except (ValueError,InvalidVersion,TypeError): return None
     alternatives=[]
     for group in expression.split('||'):
         clauses=[]
         for clause in group.split(','):
-            match=re.fullmatch(r'\s*(>=|<=|==|>|<|=)?\s*([A-Za-z0-9.!+_-]+)\s*',clause)
+            match=re.fullmatch(r'\s*(>=|<=|!=|==|>|<|=)?\s*([A-Za-z0-9.!+_-]+)\s*',clause)
             if not match:
                 clauses.append(None)
                 continue
             try: bound=version_key(match[2],ecosystem)
-            except (ValueError,InvalidVersion):
+            except (ValueError,InvalidVersion,TypeError):
                 clauses.append(None)
                 continue
             op=match[1] or '='
             clauses.append({'<':current<bound,'<=':current<=bound,'>':current>bound,
-                            '>=':current>=bound,'=':current==bound,'==':current==bound}[op])
+                            '>=':current>=bound,'=':current==bound,'==':current==bound,
+                            '!=':current!=bound}[op])
         alternatives.append(False if False in clauses else None if None in clauses else True)
     return True if True in alternatives else None if None in alternatives else False
+
+
+def in_osv_range(version: str, ecosystem: str, ranges: list[dict]) -> bool | None:
+    """Evaluate OSV ECOSYSTEM/SEMVER event ranges; unsupported ranges return None."""
+    if not isinstance(ranges, list) or not ranges:
+        return None
+    try:
+        current = version_key(version, ecosystem)
+    except (ValueError, InvalidVersion, TypeError):
+        return None
+    unknown = False
+    for interval in ranges:
+        if not isinstance(interval, dict) or interval.get('type') not in ('ECOSYSTEM', 'SEMVER'):
+            unknown = True
+            continue
+        events = interval.get('events')
+        if not isinstance(events, list) or not events:
+            unknown = True
+            continue
+        intro = None
+        has_intro = False
+        interval_unknown = False
+        matched_interval = False
+        for ev in events:
+            if not isinstance(ev, dict) or len(ev) != 1:
+                interval_unknown = True
+                break
+            if 'introduced' in ev:
+                raw_intro = ev['introduced']
+                has_intro = True
+                if raw_intro in ('0', '0.0.0'):
+                    intro = None
+                else:
+                    try:
+                        intro = version_key(raw_intro, ecosystem)
+                    except (ValueError, InvalidVersion, TypeError):
+                        interval_unknown = True
+                        break
+            elif 'fixed' in ev:
+                try:
+                    fixed = version_key(ev['fixed'], ecosystem)
+                except (ValueError, InvalidVersion, TypeError):
+                    interval_unknown = True
+                    break
+                if has_intro and (intro is None or current >= intro) and current < fixed:
+                    matched_interval = True
+                has_intro = False
+                intro = None
+            elif 'last_affected' in ev:
+                try:
+                    last_aff = version_key(ev['last_affected'], ecosystem)
+                except (ValueError, InvalidVersion, TypeError):
+                    interval_unknown = True
+                    break
+                if has_intro and (intro is None or current >= intro) and current <= last_aff:
+                    matched_interval = True
+                has_intro = False
+                intro = None
+            else:
+                interval_unknown = True
+                break
+        if interval_unknown:
+            unknown = True
+            continue
+        if has_intro and (intro is None or current >= intro):
+            matched_interval = True
+        if matched_interval:
+            return True
+    return None if unknown else False
 
 
 def github_matches(saved, dependencies):
