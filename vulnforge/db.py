@@ -685,12 +685,49 @@ class Store:
             return res
 
     def save_impact(self, repo, advisory_id, state, scan_id, evidence, recommendations):
-        with self.conn() as c:
+        now = time.time()
+        ev_dict = dict(evidence) if isinstance(evidence, dict) else (json.loads(evidence) if isinstance(evidence, str) else {})
+        with self.transaction(), self.conn() as c:
+            prev = c.execute('SELECT * FROM advisory_impacts WHERE repo=? AND advisory_id=?',
+                             (repo, advisory_id)).fetchone()
+            revisions = []
+            if prev:
+                prev_ev = json.loads(prev['evidence']) if isinstance(prev['evidence'], str) else dict(prev['evidence'] or {})
+                revisions = list(prev_ev.get('_revisions', []))
+                if not revisions:
+                    prev_recs = json.loads(prev['recommendations']) if isinstance(prev['recommendations'], str) else prev['recommendations']
+                    revisions.append({
+                        'revision': 1,
+                        'state': prev['state'],
+                        'scan_id': prev['scan_id'],
+                        'evidence': {k: v for k, v in prev_ev.items() if k != '_revisions'},
+                        'recommendations': prev_recs,
+                        'updated_at': prev['updated_at']
+                    })
+            revisions.append({
+                'revision': len(revisions) + 1,
+                'state': state,
+                'scan_id': scan_id,
+                'evidence': {k: v for k, v in ev_dict.items() if k != '_revisions'},
+                'recommendations': recommendations,
+                'updated_at': now
+            })
+            ev_dict['_revisions'] = revisions[-50:]
             c.execute('''INSERT INTO advisory_impacts(repo,advisory_id,state,scan_id,evidence,recommendations,updated_at)
                 VALUES(?,?,?,?,?,?,?) ON CONFLICT(repo,advisory_id) DO UPDATE SET
                 state=excluded.state,scan_id=excluded.scan_id,evidence=excluded.evidence,
                 recommendations=excluded.recommendations,updated_at=excluded.updated_at''',
-                (repo,advisory_id,state,scan_id,json.dumps(evidence),json.dumps(recommendations),time.time()))
+                (repo, advisory_id, state, scan_id, json.dumps(ev_dict, sort_keys=True),
+                 json.dumps(recommendations, sort_keys=True), now))
+
+    def impact_history(self, repo: str, advisory_id: str) -> list[dict]:
+        with self.conn() as c:
+            row = c.execute('SELECT evidence FROM advisory_impacts WHERE repo=? AND advisory_id=?',
+                            (repo, advisory_id)).fetchone()
+            if not row:
+                return []
+            ev = json.loads(row['evidence']) if isinstance(row['evidence'], str) else (row['evidence'] or {})
+            return list(ev.get('_revisions', []))
 
     def pending_impact(self, repo, advisory_id, delivery):
         advisory=self.advisory(advisory_id)
