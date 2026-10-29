@@ -214,3 +214,15 @@ class Identities:
                 (repo,repository['connection_id'],organization_id,actor_id,int(enabled),json.dumps(normalized),json.dumps(sorted(set(paths))),time.time()))
             self.store.audit_event(repo,None,actor_id,'remediation_policy_changed',{'enabled':enabled,'organization_id':organization_id})
         return {'repo':repo,'enabled':enabled,'automerge':False,'publication_ready':False}
+
+    def remove_repository_ownership(self,organization_id,repo,actor_id):
+        with self.store.transaction(),self.store.conn() as c:
+            self._lock_organization(c,organization_id)
+            self._require_admin(c,organization_id,actor_id)
+            row=c.execute('SELECT 1 FROM repository_ownership WHERE repo=? AND organization_id=?',(repo,organization_id)).fetchone()
+            if row is None:
+                raise LookupError('Repository connection not found')
+            c.execute('DELETE FROM repository_ownership WHERE repo=? AND organization_id=?',(repo,organization_id))
+            c.execute('DELETE FROM remediation_policies WHERE repo=? AND organization_id=?',(repo,organization_id))
+            self.store.audit_event(repo,None,actor_id,'repository_ownership_deleted',{'organization_id':organization_id})
+        return {'repo':repo,'organization_id':organization_id,'status':'disconnected'}

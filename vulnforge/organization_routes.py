@@ -403,6 +403,12 @@ def install_organization_routes(app,cfg,store):
     async def repositories(limit:int=Query(50,ge=1,le=100),data=Depends(scoped)):
         return data.rows('repositories',limit=limit)
 
+    @router.delete('/repositories/{repo:path}',dependencies=[Depends(csrf)],status_code=200)
+    async def disconnect_repository(repo:str,data=Depends(scoped)):
+        try: return data.disconnect_repository(repo)
+        except LookupError: raise HTTPException(404,'Repository connection not found') from None
+        except PermissionError: raise HTTPException(403,'Organization administrator permission required') from None
+
     @router.get('/repositories/{repo:path}/health')
     async def repository_health(repo:str,data=Depends(scoped)):
         return data.project_health(repo)

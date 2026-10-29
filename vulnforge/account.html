@@ -1,60 +1,468 @@
 <!doctype html>
-<html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>VulnForge — Projelerim</title>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>VulnForge — Projelerim ve Güvenlik Yönetimi</title>
 <style>
-:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0a101c;color:#dfe9f8;font:16px/1.6 system-ui,sans-serif}main{max-width:1100px;margin:5vh auto;padding:24px}a{color:#91f5dc}button,.login,select,input{border:1px solid #288473;border-radius:9px;padding:10px 14px;background:#143b35;color:white;font:inherit}input[type=checkbox]{width:auto}input{max-width:100%}button:disabled{opacity:.5;cursor:wait}button,.login{cursor:pointer;text-decoration:none}button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid #a3eee1;outline-offset:3px}header,.controls{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}p,.muted{color:#b6c6d9}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card,section.panel{background:#101b2c;border:1px solid #243449;border-radius:12px;padding:20px;margin:16px 0}.number{display:block;font-size:32px;font-weight:700}.scroll{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:680px;font-size:14px}th,td{text-align:left;padding:12px;border-bottom:1px solid #243449;overflow-wrap:anywhere}th{color:#b6c6d9;white-space:nowrap}td{min-width:130px;max-width:340px}.warning{color:#f4c38a}.error{color:#ffa9a9}h1,h2{line-height:1.3}h2{font-size:21px}details{padding:10px 0}summary{cursor:pointer}[hidden]{display:none!important}@media(max-width:600px){.cards{grid-template-columns:1fr;gap:0}main{padding:16px}th,td{padding:8px}select{max-width:100%}}
-</style></head>
-<body><main><header><h1>VulnForge</h1><button id="logout" hidden>Çıkış yap</button></header>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#0a101c;color:#dfe9f8;font:16px/1.6 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+.skip-link{position:absolute;top:-40px;left:0;background:#143b35;color:white;padding:8px 16px;z-index:100;text-decoration:none;border-radius:0 0 8px 0;transition:top .2s}
+.skip-link:focus{top:0}
+main{max-width:1100px;margin:3vh auto;padding:20px}
+a{color:#91f5dc}
+button,.login,select,input{border:1px solid #288473;border-radius:8px;padding:12px 16px;background:#143b35;color:white;font:inherit;min-height:44px;min-width:44px;touch-action:manipulation}
+button:disabled{opacity:.5;cursor:not-allowed}
+button,.login{cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+button:focus-visible,a:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #a3eee1;outline-offset:3px}
+header,.controls{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+p,.muted{color:#b6c6d9}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin:20px 0}
+.card,section.panel{background:#101b2c;border:1px solid #243449;border-radius:12px;padding:20px;margin:16px 0}
+.number{display:block;font-size:32px;font-weight:700;margin-top:6px}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:8px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:14px}
+th,td{text-align:left;padding:12px;border-bottom:1px solid #243449;overflow-wrap:anywhere}
+th{color:#b6c6d9;white-space:nowrap;background:#0d1624}
+td{min-width:120px;max-width:320px}
+.badge{padding:4px 8px;border-radius:6px;font-size:12px;font-weight:600;display:inline-block}
+.badge-critical{background:#4d0d12;color:#ff8585;border:1px solid #8c1e22}
+.badge-high{background:#422108;color:#ffb266;border:1px solid #7a3a0e}
+.warning{color:#f4c38a}
+.error-banner{background:#421114;border:1px solid #8c2328;color:#ffc7c7;padding:16px;border-radius:8px;margin:16px 0}
+.empty-box{padding:24px;text-align:center;color:#8fa1b7;border:1px dashed #243449;border-radius:8px;margin:8px 0}
+.danger-button{background:#4a1215;border-color:#801f24;color:#ff9999}
+.danger-button:hover{background:#5c181c}
+[hidden]{display:none!important}
+@media(max-width:600px){
+  main{padding:12px;margin:1vh auto}
+  .cards{grid-template-columns:1fr;gap:12px}
+  th,td{padding:10px 8px}
+  button,.login,select,input{width:100%}
+  header,.controls{flex-direction:column;align-items:stretch}
+}
+</style>
+</head>
+<body>
+<a href="#workspace" class="skip-link">Ana içeriğe atla</a>
+<main>
+<header>
+  <h1>VulnForge</h1>
+  <div style="display:flex;gap:10px;align-items:center;">
+    <button id="logout" hidden aria-label="Hesaptan çıkış yap">Çıkış yap</button>
+  </div>
+</header>
+
+<div id="session-expired-alert" class="error-banner" role="alert" hidden>
+  <strong>⚠️ Oturumunuz sona erdi.</strong> Güvenliğiniz için lütfen yeniden giriş yapın.
+  <div style="margin-top:12px;">
+    <a class="login" href="/auth/github/login" style="background:#1f6356;">Tekrar Giriş Yap</a>
+  </div>
+</div>
+
 <p id="status" role="status" aria-live="polite">Giriş durumu kontrol ediliyor…</p>
 <a id="login" class="login" href="/auth/github/login" hidden>GitHub ile giriş yap</a>
 <p class="muted">Proje bağlantısı ve müşteri rapor yüklemesi henüz genel kullanıma açılmadı. Mevcut projeler yalnız yetkili hesaplarla görüntülenir.</p>
-<section id="create-organization" class="panel" hidden><h2>Kuruluş oluştur</h2><p>Projelerini ve ekip erişimini bir kuruluş altında topla.</p><form id="organization-form"><label for="organization-name">Kuruluş adı</label> <input id="organization-name" maxlength="100" required autocomplete="organization"> <button type="submit">Oluştur</button></form><p id="organization-result" role="status" aria-live="polite"></p></section>
-<div id="workspace" hidden><div class="controls"><label for="organization">Kuruluş <select id="organization"></select></label><button id="refresh">Yenile</button></div>
-<p id="role" class="muted"></p><p id="notice" role="status" aria-live="polite"></p>
-<section id="onboarding-checklist" class="panel" hidden><h2>İlk kullanım ve kurulum adımları</h2><p class="muted">Kurulumu tamamlamak için aşağıdaki adımları sırayla uygulayın:</p><div id="onboarding-steps"></div></section>
-<section id="connect-project" class="panel" hidden><h2>GitHub projesi bağla</h2><p>Önce VulnForge GitHub App'ini seçtiğin projeye kur. Bu önizleme yalnız <strong>Metadata: read</strong> iznini kabul eder. GitHub'da proje yöneticisi ve burada kuruluş yöneticisi olmalısın.</p><p>Kaynak kod müşteri koşucusunda kalır. Servis repo kimliğini ve daha sonra izin verilen paket/sürüm ve bulgu özetlerini alabilir; bu bilgiler hassas olabilir. Bu işlem kaynak kodu erişimini, dış paket paylaşımını veya otomatik düzeltmeyi açmaz. İlk tarama ayrıca kurulacaktır.</p><form id="connection-form"><label for="connection-repo">GitHub projesi (sahip/proje)</label> <input id="connection-repo" maxlength="256" pattern="[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" placeholder="kurulus/projem" required autocomplete="off"><p><label><input id="metadata-consent" type="checkbox" required> Bu proje için belirtilen metadata bağlantısını onaylıyorum.</label></p><button id="connect-button" type="submit">GitHub'da yetkimi doğrula</button></form><p id="connection-result" role="status" aria-live="polite"></p></section>
-<div class="cards"><div class="card">Projeler<span id="repo-count" class="number">—</span></div><div class="card">Açık bulgular<span id="finding-count" class="number">—</span></div><div class="card">Etki gözlenen projeler<span id="impact-count" class="number">—</span></div></div>
-<section class="panel"><h2>Projeler ve son taramalar</h2><p class="muted">Her kayıt yalnız belirtilen değişikliğin anlık görüntüsüdür; geçmişin tamamı taranmış sayılmaz. Eksik veya eski tarama, projenin güvenli olduğunu göstermez. Listeler en fazla 50 kayıtla sınırlıdır. Dar ekranda tabloları yana kaydırabilirsin.</p><div id="repositories" class="scroll" tabindex="0" aria-label="Projeler tablosu"></div></section>
-<section class="panel"><h2>Etkilenen projeler ve güncelleme seçenekleri</h2><p class="warning">Öneri uygulamadan önce sürümün yayımlandığını, uyumluluğu ve testleri kontrol et. Otomatik birleştirme kapalıdır.</p><div id="impacts" class="scroll" tabindex="0" aria-label="Etkilenen projeler tablosu"></div></section>
-<section class="panel"><h2>Düzeltmeler ve PR durumu</h2><p class="muted">Onay bekleyen, doğrulanan, engellenen ve yayımlanan yamalar ayrı gösterilir.</p><div id="remediations" class="scroll" tabindex="0" aria-label="Düzeltmeler tablosu"></div></section>
-<section class="panel"><h2>Bulgular</h2><label for="severity">Önem derecesi <select id="severity"><option value="">Tümü</option><option value="critical">Kritik</option><option value="high">Yüksek</option><option value="medium">Orta</option><option value="low">Düşük</option><option value="info">Bilgi</option></select></label><div id="findings" class="scroll" tabindex="0" aria-label="Bulgular tablosu"></div><div id="finding-detail" class="panel" hidden style="margin-top:16px;"><h3>Bulgu kanıtı ve ayrıntıları</h3><div id="finding-detail-content"></div></div></section></div>
-</main><script>
+
+<section id="create-organization" class="panel" hidden>
+  <h2>Kuruluş oluştur</h2>
+  <p>Projelerini ve ekip erişimini bir kuruluş altında topla.</p>
+  <form id="organization-form">
+    <label for="organization-name" style="display:block;margin-bottom:6px;">Kuruluş adı</label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <input id="organization-name" maxlength="100" required autocomplete="organization" placeholder="Örn: Acme Güvenlik">
+      <button type="submit">Oluştur</button>
+    </div>
+  </form>
+  <p id="organization-result" role="status" aria-live="polite"></p>
+</section>
+
+<div id="workspace" hidden>
+  <div class="controls">
+    <label for="organization" style="font-weight:600;">Kuruluş: 
+      <select id="organization" aria-label="Aktif kuruluş seçimi"></select>
+    </label>
+    <button id="refresh" aria-label="Verileri ve listeleri yenile">🔄 Yenile</button>
+  </div>
+  <p id="role" class="muted"></p>
+  <p id="notice" role="status" aria-live="polite"></p>
+
+  <section id="onboarding-checklist" class="panel" hidden>
+    <h2>İlk kullanım ve kurulum adımları</h2>
+    <p class="muted">Kurulumu tamamlamak için aşağıdaki adımları sırayla uygulayın:</p>
+    <div id="onboarding-steps"></div>
+  </section>
+
+  <section id="connect-project" class="panel" hidden>
+    <h2>GitHub projesi bağla</h2>
+    <p>Önce VulnForge GitHub App'ini seçtiğin projeye kur. Bu önizleme yalnız <strong>Metadata: read</strong> iznini kabul eder. GitHub'da proje yöneticisi ve burada kuruluş yöneticisi olmalısın.</p>
+    <form id="connection-form">
+      <label for="connection-repo" style="display:block;margin-bottom:6px;">GitHub projesi (sahip/proje)</label>
+      <input id="connection-repo" maxlength="256" pattern="[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+" placeholder="kurulus/projem" required autocomplete="off" style="width:100%;max-width:400px;margin-bottom:12px;">
+      <p><label><input id="metadata-consent" type="checkbox" required> Bu proje için belirtilen metadata bağlantısını onaylıyorum.</label></p>
+      <button id="connect-button" type="submit">GitHub'da yetkimi doğrula</button>
+    </form>
+    <p id="connection-result" role="status" aria-live="polite"></p>
+  </section>
+
+  <div class="cards" role="region" aria-label="Güvenlik genel durumu">
+    <div class="card">Projeler<span id="repo-count" class="number">—</span></div>
+    <div class="card">Açık bulgular<span id="finding-count" class="number">—</span></div>
+    <div class="card">Etki gözlenen projeler<span id="impact-count" class="number">—</span></div>
+  </div>
+
+  <section class="panel" role="region" aria-labelledby="h-repos">
+    <h2 id="h-repos">Projeler ve son taramalar</h2>
+    <p class="muted">Her kayıt yalnız belirtilen değişikliğin anlık görüntüsüdür. Listeler en fazla 50 kayıtla sınırlıdır.</p>
+    <div id="repositories" class="scroll" tabindex="0" aria-label="Projeler tablosu"></div>
+  </section>
+
+  <section class="panel" role="region" aria-labelledby="h-impacts">
+    <h2 id="h-impacts">Etkilenen projeler ve güncelleme seçenekleri</h2>
+    <p class="warning">Öneri uygulamadan önce sürümün yayımlandığını, uyumluluğu ve testleri kontrol et. Otomatik birleştirme kapalıdır.</p>
+    <div id="impacts" class="scroll" tabindex="0" aria-label="Etkilenen projeler tablosu"></div>
+  </section>
+
+  <section class="panel" role="region" aria-labelledby="h-remediations">
+    <h2 id="h-remediations">Düzeltmeler ve PR durumu</h2>
+    <p class="muted">Onay bekleyen, doğrulanan, engellenen ve yayımlanan yamalar ayrı gösterilir.</p>
+    <div id="remediations" class="scroll" tabindex="0" aria-label="Düzeltmeler tablosu"></div>
+  </section>
+
+  <section class="panel" role="region" aria-labelledby="h-findings">
+    <h2 id="h-findings">Bulgular</h2>
+    <label for="severity" style="display:inline-block;margin-bottom:12px;">Önem derecesi: 
+      <select id="severity">
+        <option value="">Tümü</option>
+        <option value="critical">Kritik</option>
+        <option value="high">Yüksek</option>
+        <option value="medium">Orta</option>
+        <option value="low">Düşük</option>
+        <option value="info">Bilgi</option>
+      </select>
+    </label>
+    <div id="findings" class="scroll" tabindex="0" aria-label="Bulgular tablosu"></div>
+    <div id="finding-detail" class="panel" hidden style="margin-top:16px;">
+      <h3>Bulgu kanıtı ve ayrıntıları</h3>
+      <div id="finding-detail-content"></div>
+    </div>
+  </section>
+
+  <section id="privacy-section" class="panel" role="region" aria-labelledby="h-privacy">
+    <h2 id="h-privacy">Gizlilik ve Proje Bağlantı Yönetimi</h2>
+    <p class="muted">Bağlı projelerinizi yönetebilir veya kuruluş erişim izinlerini dilediğiniz an kaldırabilirsiniz.</p>
+    <div id="privacy-repo-list"></div>
+  </section>
+</div>
+</main>
+
+<script>
 const byId=id=>document.getElementById(id),status=byId('status'),login=byId('login'),logout=byId('logout');
 let organizations=[],generation=0,connectionEnabled=false;
 const roles={org_admin:'Kuruluş yöneticisi',maintainer:'Proje sorumlusu',analyst:'Analist',viewer:'Görüntüleyici',auditor:'Denetçi'};
 const states={complete:'Tamamlandı (belirtilen kapsam)',incomplete:'Kısmi tarama',failed:'Tarama başarısız',running:'Tarama sürüyor',affected:'Etkileniyor',under_investigation:'İnceleniyor',not_affected:'Bu sürüm etkilenmiyor',withdrawn:'Duyuru geri çekildi',open:'Açık',resolved:'Çözüldü',false_positive:'Yanlış pozitif',risk_accepted:'Süreli risk kabulü',suppressed:'Süreli bastırma'};
 const remStates={pending_approval:'Onay bekliyor',validated:'Doğrulandı (Onaylı)',blocked:'Engellendi',published:'Yayımlandı'};
-function empty(id,message){byId(id).replaceChildren(document.createTextNode(message));}
-function table(id,columns,rows){const host=byId(id);host.replaceChildren();if(!rows.length){host.textContent='Gösterilecek kayıt yok.';return;}
-const t=document.createElement('table'),head=t.createTHead().insertRow();for(const name of columns){const th=document.createElement('th');th.scope='col';th.textContent=name;head.append(th);}const body=t.createTBody();for(const values of rows){const row=body.insertRow();for(const value of values){const td=row.insertCell();td.textContent=value==null?'—':String(value);}}host.append(t);}
-const evidenceLabels={fresh_snapshot:'Yakın tarihli tam anlık görüntü',needs_review:'Yeniden inceleme gerekli',missing:'Henüz envanter yok'};
-function evidence(value){const reasons=value?.reasons||[];let label=evidenceLabels[value?.status]||'Kanıt bilinmiyor';if(reasons.includes('default_branch_push_since_snapshot'))label='Proje değişti; yeni tarama gerekli';else if(value?.scan_state==='failed')label='Son envanter taraması başarısız';else if(value?.scan_state==='running')label='Envanter taraması sürüyor';else if(value?.scan_state==='incomplete')label='Envanter kapsamı eksik';return label+(value?.intelligence_age==='stale'?' · Açık verisi eski':value?.intelligence_age==='unknown'?' · Açık verisinin tazeliği bilinmiyor':'');}
-function date(value){return value?new Date(value*1000).toLocaleString():'Henüz yok';}
-async function api(path){const response=await fetch(path,{cache:'no-store',credentials:'same-origin'});if(response.status===401){generation++;byId('create-organization').hidden=true;byId('connect-project').hidden=true;byId('workspace').hidden=true;logout.hidden=true;login.hidden=false;status.textContent='Oturumun sona erdi veya yetkin değişti. Tekrar giriş yap.';throw Error('session');}if(!response.ok)throw Error(String(response.status));return response.json();}
-function updateConnect(){const selected=byId('organization').value;byId('connect-project').hidden=!connectionEnabled||organizations.find(o=>o.id===selected)?.role!=='org_admin';byId('metadata-consent').checked=false;byId('connection-result').textContent='';}
-async function loadWorkspace(){updateConnect();const selected=byId('organization').value;if(!selected)return;const current=++generation;byId('notice').textContent='Projeler yükleniyor…';for(const id of ['repositories','findings','impacts','remediations'])empty(id,'Yükleniyor…');for(const id of ['repo-count','finding-count','impact-count'])byId(id).textContent='—';
-const root='/api/v1/organizations/'+encodeURIComponent(selected);byId('role').textContent=roles[organizations.find(o=>o.id===selected)?.role]||'';
-try{const severity=byId('severity').value,results=await Promise.all([api(root+'/overview'),api(root+'/repositories'),api(root+'/scans'),api(root+'/impacts'),api(root+'/findings'+(severity?'?severity='+encodeURIComponent(severity):'')),api(root+'/onboarding'),api(root+'/remediations')]);if(current!==generation)return;const [overview,repos,scans,impacts,findings,onboarding,remediations]=results;
-byId('onboarding-checklist').hidden=onboarding.steps_completed===onboarding.total_steps;
-if(!byId('onboarding-checklist').hidden){
-  byId('onboarding-steps').innerHTML='<ul style="list-style:none;padding:0">'+onboarding.steps.map(s=>'<li style="margin:8px 0">'+(s.completed?'<span style="color:#42d4ad">✓</span> ':'<span style="color:#f4c38a">○</span> ')+s.title+(s.completed?' <span class="muted">(Tamamlandı)</span>':' <span class="warning">(Bekleniyor)</span>')+'</li>').join('')+'</ul>';
+
+function empty(id,message,isEmptyState=false){
+  const host=byId(id);
+  host.replaceChildren();
+  if(isEmptyState){
+    const div=document.createElement('div');
+    div.className='empty-box';
+    div.textContent=message;
+    host.append(div);
+  } else {
+    host.textContent=message;
+  }
 }
-byId('repo-count').textContent=overview.repositories;byId('finding-count').textContent=overview.open_findings;byId('impact-count').textContent=overview.affected_projects;
-const latest=new Map();for(const scan of scans.items)if(!latest.has(scan.repo))latest.set(scan.repo,scan);
-table('repositories',['Proje','Bağlantı','Son envanter','Kapsam ve tazelik','İncelenen değişiklik'],repos.items.map(repo=>{const value=repo.evidence_status;return [repo.full_name,repo.connection_status==='connected'?'Bağlı (Aktif)':'Bekleniyor',date(value?.inventory_observed_at),evidence(value)+' · Geçmiş kapsamı doğrulanmadı',value?.commit_sha?.slice(0,12)||'—'];}));
-table('findings',['Önem','Bulgu','Proje','Durum'],findings.items.map(f=>[({critical:'Kritik',high:'Yüksek',medium:'Orta',low:'Düşük',info:'Bilgi'})[f.severity]||'Bilinmiyor',f.title,f.repo,states[f.status]||f.status]));
-table('impacts',['Proje','Güvenlik duyurusu','Sorumlu','Durum','Güncelleme seçenekleri'],impacts.items.map(i=>[i.repo,i.advisory_id,i.assigned_to||'Atanmadı',(states[i.assessment_state||i.state]||i.state)+' · '+evidence(i.freshness),i.recommendations.map(r=>(r.package||'Paket')+': '+(r.current_version||'Mevcut sürüm bilinmiyor')+' → '+(r.recommended_version||(r.freshness==='needs_reverification'?'Yeniden doğrulama gerekli':'Doğrulanmış seçenek yok'))).join('; ')||'Henüz öneri yok']));
-table('remediations',['Proje','Yama / Plan','Durum','Detay'],remediations.items.map(r=>[r.repo,r.plan_id||r.key||'Yama',remStates[r.status]||r.status,r.url||(r.blockers?.length?'Engeller: '+r.blockers.join(', '):'Doğrulama tamamlandı')]));
-const limited=[repos,scans,impacts,findings,remediations].some(x=>x.truncated||x.next_cursor!=null);byId('notice').textContent=limited?'Daha fazla kayıt bulunuyor. Bu ekran tüm geçmişi göstermez.':'Görünen kayıtlar yenilendi. Tarama tarihi ve kapsamını birlikte değerlendir.';
-}catch(error){if(current!==generation)return;for(const id of ['repositories','findings','impacts','remediations'])empty(id,'Kayıtlar gösterilemiyor.');byId('notice').textContent=error.message==='403'?'Bu işlem için yetkin yok.':error.message==='404'?'Kuruluş erişimin değişti. Sayfayı yenile.':'Kayıtlar alınamadı. Yeniden dene.';}}
-async function load(){try{const configuration=await fetch('/auth/status',{cache:'no-store'});if(!configuration.ok)throw Error();const config=await configuration.json();connectionEnabled=!!config.github_connection_preview;if(!config.github_login_configured){status.textContent='GitHub girişi henüz yapılandırılmadı.';return;}
-const user=await api('/api/v1/me');status.textContent=user.login+' olarak giriş yaptın. Oturum en geç '+date(user.expires_at)+' tarihinde sona erecek.';logout.hidden=false;byId('create-organization').hidden=false;
-const outcome=new URLSearchParams(location.search).get('connection');if(outcome==='connected')status.textContent+=' Proje bağlandı; ilk koşucu raporu bekleniyor.';else if(outcome==='failed')status.textContent+=' Proje bağlanamadı. App kurulumu, repo yönetici yetkin ve seçili hesabı kontrol edip yeniden dene.';
-try{const result=await api('/api/v1/organizations');organizations=result.items;if(!organizations.length){status.textContent+=' Henüz bir kuruluşa üye değilsin. Yöneticinin davetini bekleyebilirsin.';return;}byId('organization').replaceChildren();for(const org of organizations){const option=document.createElement('option');option.value=org.id;option.textContent=org.name;byId('organization').append(option);}byId('workspace').hidden=false;await loadWorkspace();}catch(error){if(error.message==='session')return;status.textContent+=' Proje ekranı bu ortamda henüz açılmadı.';}
-}catch(error){if(error.message!=='session')status.textContent='Giriş durumu alınamadı. Sayfayı yenileyerek tekrar dene.';}}
-function csrfValue(){const value=document.cookie.split('; ').find(v=>v.startsWith('__Host-vf_csrf=')||v.startsWith('vf_local_csrf='));return value?decodeURIComponent(value.split('=')[1]):'';}
-async function mutate(path,body){const response=await fetch(path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':csrfValue()},body:JSON.stringify(body)});if(!response.ok)throw Error(String(response.status));return response.json();}
-byId('organization-form').addEventListener('submit',async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;try{await mutate('/api/v1/organizations',{name:byId('organization-name').value});location.replace('/account');}catch{byId('organization-result').textContent='Kuruluş oluşturulamadı. Adı ve oturumunu kontrol et.';button.disabled=false;}});
-byId('connection-form').addEventListener('submit',async event=>{event.preventDefault();const selected=byId('organization').value;if(!selected||!byId('metadata-consent').checked)return;byId('connect-button').disabled=true;byId('connection-result').textContent='Yetki doğrulaması hazırlanıyor…';try{const result=await mutate('/api/v1/organizations/'+encodeURIComponent(selected)+'/connections/begin',{repo:byId('connection-repo').value.trim(),consent:true,consent_version:'metadata-v1'});const target=new URL(result.authorization_url);if(target.origin!=='https://github.com'||target.pathname!=='/login/oauth/authorize')throw Error();location.assign(target.href);}catch{byId('connection-result').textContent='Bağlantı başlatılamadı. Kuruluş yetkini ve oturumunu kontrol et.';byId('connect-button').disabled=false;}});
-logout.addEventListener('click',async()=>{try{const csrf=document.cookie.split('; ').find(value=>value.startsWith('__Host-vf_csrf=')||value.startsWith('vf_local_csrf='));const response=await fetch('/auth/logout',{method:'POST',headers:{'X-CSRF-Token':csrf?decodeURIComponent(csrf.split('=')[1]):''}});if(!response.ok)throw Error();location.replace('/account');}catch{status.textContent='Çıkış yapılamadı. Yeniden dene.';}});
-byId('organization').addEventListener('change',loadWorkspace);byId('refresh').addEventListener('click',loadWorkspace);byId('severity').addEventListener('change',loadWorkspace);load();
-</script></body></html>
+
+function table(id,columns,rows,emptyMsg='Gösterilecek kayıt yok.'){
+  const host=byId(id);
+  host.replaceChildren();
+  if(!rows.length){
+    empty(id,emptyMsg,true);
+    return;
+  }
+  const t=document.createElement('table'),head=t.createTHead().insertRow();
+  for(const name of columns){
+    const th=document.createElement('th');
+    th.scope='col';
+    th.textContent=name;
+    head.append(th);
+  }
+  const body=t.createTBody();
+  for(const values of rows){
+    const row=body.insertRow();
+    for(const value of values){
+      const td=row.insertCell();
+      if(value instanceof HTMLElement) td.append(value);
+      else td.textContent=value==null?'—':String(value);
+    }
+  }
+  host.append(t);
+}
+
+const evidenceLabels={fresh_snapshot:'Yakın tarihli tam anlık görüntü',needs_review:'Yeniden inceleme gerekli',missing:'Henüz envanter yok'};
+function evidence(value){
+  const reasons=value?.reasons||[];
+  let label=evidenceLabels[value?.status]||'Kanıt bilinmiyor';
+  if(reasons.includes('default_branch_push_since_snapshot'))label='Proje değişti; yeni tarama gerekli';
+  else if(value?.scan_state==='failed')label='Son envanter taraması başarısız';
+  else if(value?.scan_state==='running')label='Envanter taraması sürüyor';
+  else if(value?.scan_state==='incomplete')label='Envanter kapsamı eksik';
+  return label+(value?.intelligence_age==='stale'?' · Açık verisi eski':value?.intelligence_age==='unknown'?' · Açık verisinin tazeliği bilinmiyor':'');
+}
+
+function date(value){return value?new Date(value*1000).toLocaleString():'Henüz yok';}
+
+async function api(path){
+  const response=await fetch(path,{cache:'no-store',credentials:'same-origin',headers:{'X-Request-ID':'req-'+Math.random().toString(36).slice(2,10)}});
+  if(response.status===401){
+    generation++;
+    byId('create-organization').hidden=true;
+    byId('connect-project').hidden=true;
+    byId('workspace').hidden=true;
+    logout.hidden=true;
+    login.hidden=false;
+    byId('session-expired-alert').hidden=false;
+    status.textContent='Oturumunuzun süresi doldu veya yetkiniz değişti. Lütfen tekrar giriş yapın.';
+    throw Error('session');
+  }
+  if(!response.ok)throw Error(String(response.status));
+  return response.json();
+}
+
+function csrfValue(){
+  const value=document.cookie.split('; ').find(v=>v.startsWith('__Host-vf_csrf=')||v.startsWith('vf_local_csrf='));
+  return value?decodeURIComponent(value.split('=')[1]):'';
+}
+
+async function mutate(path,body,method='POST'){
+  const response=await fetch(path,{
+    method:method,
+    credentials:'same-origin',
+    headers:{
+      'Content-Type':'application/json',
+      'X-CSRF-Token':csrfValue(),
+      'X-Request-ID':'mut-'+Math.random().toString(36).slice(2,10)
+    },
+    body:body?JSON.stringify(body):undefined
+  });
+  if(!response.ok)throw Error(String(response.status));
+  if(response.status===204)return null;
+  return response.json();
+}
+
+function updateConnect(){
+  const selected=byId('organization').value;
+  byId('connect-project').hidden=!connectionEnabled||organizations.find(o=>o.id===selected)?.role!=='org_admin';
+  byId('metadata-consent').checked=false;
+  byId('connection-result').textContent='';
+}
+
+async function disconnectRepo(repo){
+  const selected=byId('organization').value;
+  if(!selected)return;
+  if(!confirm(`"${repo}" projesinin VulnForge bağlantısını ve saklanan ilişkilerini kaldırmak istediğinize emin misiniz?`))return;
+  try{
+    await mutate('/api/v1/organizations/'+encodeURIComponent(selected)+'/repositories/'+encodeURIComponent(repo),null,'DELETE');
+    alert('Proje bağlantısı başarıyla kaldırıldı.');
+    await loadWorkspace();
+  }catch(e){
+    alert('Proje bağlantısı kaldırılamadı. Kuruluş yöneticisi yetkinizi kontrol edin.');
+  }
+}
+
+async function loadWorkspace(){
+  updateConnect();
+  const selected=byId('organization').value;
+  if(!selected)return;
+  const current=++generation;
+  byId('notice').textContent='Projeler yükleniyor…';
+  for(const id of ['repositories','findings','impacts','remediations'])empty(id,'Yükleniyor…');
+  for(const id of ['repo-count','finding-count','impact-count'])byId(id).textContent='—';
+
+  const root='/api/v1/organizations/'+encodeURIComponent(selected);
+  const userOrg=organizations.find(o=>o.id===selected);
+  byId('role').textContent=roles[userOrg?.role]||'';
+  const isAdmin=userOrg?.role==='org_admin';
+
+  try{
+    const severity=byId('severity').value;
+    const results=await Promise.all([
+      api(root+'/overview'),
+      api(root+'/repositories'),
+      api(root+'/scans'),
+      api(root+'/impacts'),
+      api(root+'/findings'+(severity?'?severity='+encodeURIComponent(severity):'')),
+      api(root+'/onboarding'),
+      api(root+'/remediations')
+    ]);
+    if(current!==generation)return;
+    const [overview,repos,scans,impacts,findings,onboarding,remediations]=results;
+
+    byId('onboarding-checklist').hidden=onboarding.steps_completed===onboarding.total_steps;
+    if(!byId('onboarding-checklist').hidden){
+      byId('onboarding-steps').innerHTML='<ul style="list-style:none;padding:0">'+onboarding.steps.map(s=>'<li style="margin:8px 0">'+(s.completed?'<span style="color:#42d4ad">✓</span> ':'<span style="color:#f4c38a">○</span> ')+s.title+(s.completed?' <span class="muted">(Tamamlandı)</span>':' <span class="warning">(Bekleniyor)</span>')+'</li>').join('')+'</ul>';
+    }
+
+    byId('repo-count').textContent=overview.repositories;
+    byId('finding-count').textContent=overview.open_findings;
+    byId('impact-count').textContent=overview.affected_projects;
+
+    table('repositories',['Proje','Bağlantı','Son envanter','Kapsam ve tazelik','İncelenen değişiklik'],repos.items.map(repo=>{
+      const value=repo.evidence_status;
+      return [repo.full_name,repo.connection_status==='connected'?'Bağlı (Aktif)':'Bekleniyor',date(value?.inventory_observed_at),evidence(value)+' · Geçmiş kapsamı doğrulanmadı',value?.commit_sha?.slice(0,12)||'—'];
+    }),'Henüz bağlı bir proje yok. Kuruluşunuza proje bağlamak için yukarıdaki adımı kullanın.');
+
+    table('findings',['Önem','Bulgu','Proje','Durum'],findings.items.map(f=>[
+      ({critical:'Kritik',high:'Yüksek',medium:'Orta',low:'Düşük',info:'Bilgi'})[f.severity]||'Bilinmiyor',
+      f.title,f.repo,states[f.status]||f.status
+    ]),'Harika! Seçili filtrede açık güvenlik bulgusu bulunmuyor.');
+
+    table('impacts',['Proje','Güvenlik duyurusu','Sorumlu','Durum','Güncelleme seçenekleri'],impacts.items.map(i=>[
+      i.repo,i.advisory_id,i.assigned_to||'Atanmadı',
+      (states[i.assessment_state||i.state]||i.state)+' · '+evidence(i.freshness),
+      i.recommendations.map(r=>(r.package||'Paket')+': '+(r.current_version||'Mevcut sürüm bilinmiyor')+' → '+(r.recommended_version||(r.freshness==='needs_reverification'?'Yeniden doğrulama gerekli':'Doğrulanmış seçenek yok'))).join('; ')||'Henüz öneri yok'
+    ]),'Güvenlik açıklarından etkilenen bir proje tespit edilmedi.');
+
+    table('remediations',['Proje','Yama / Plan','Durum','Detay'],remediations.items.map(r=>[
+      r.repo,r.plan_id||r.key||'Yama',remStates[r.status]||r.status,r.url||(r.blockers?.length?'Engeller: '+r.blockers.join(', '):'Doğrulama tamamlandı')
+    ]),'Bekleyen veya yürütülen yama planı yok.');
+
+    // Privacy repo disconnection panel
+    const privacyHost=byId('privacy-repo-list');
+    privacyHost.replaceChildren();
+    if(!repos.items.length){
+      empty('privacy-repo-list','Bağlı proje bulunmadığı için silinecek bağlantı yok.',true);
+    } else {
+      const pTable=document.createElement('table');
+      const pHead=pTable.createTHead().insertRow();
+      for(const h of ['Proje Adı','Erişim Durumu','İşlemler']){
+        const th=document.createElement('th');th.textContent=h;pHead.append(th);
+      }
+      const pBody=pTable.createTBody();
+      for(const repo of repos.items){
+        const rRow=pBody.insertRow();
+        rRow.insertCell().textContent=repo.full_name;
+        rRow.insertCell().textContent=repo.connection_status==='connected'?'Aktif Bağlı':'Bekleniyor';
+        const actCell=rRow.insertCell();
+        if(isAdmin){
+          const delBtn=document.createElement('button');
+          delBtn.className='danger-button';
+          delBtn.textContent='Bağlantıyı Kaldır';
+          delBtn.setAttribute('aria-label',`${repo.full_name} projesinin bağlantısını kaldır`);
+          delBtn.onclick=()=>disconnectRepo(repo.full_name);
+          actCell.append(delBtn);
+        } else {
+          actCell.textContent='Yalnız yönetici silebilir';
+        }
+      }
+      privacyHost.append(pTable);
+    }
+
+    const limited=[repos,scans,impacts,findings,remediations].some(x=>x.truncated||x.next_cursor!=null);
+    byId('notice').textContent=limited?'Daha fazla kayıt bulunuyor. Bu ekran tüm geçmişi göstermez.':'Görünen kayıtlar yenilendi. Tarama tarihi ve kapsamını birlikte değerlendir.';
+  }catch(error){
+    if(current!==generation)return;
+    for(const id of ['repositories','findings','impacts','remediations'])empty(id,'Kayıtlar gösterilemiyor.');
+    byId('notice').textContent=error.message==='403'?'Bu işlem için yetkiniz yok.':error.message==='404'?'Kuruluş erişiminiz değişti. Sayfayı yenileyin.':'Kayıtlar alınamadı. Lütfen yeniden deneyin.';
+  }
+}
+
+async function load(){
+  try{
+    const configuration=await fetch('/auth/status',{cache:'no-store'});
+    if(!configuration.ok)throw Error();
+    const config=await configuration.json();
+    connectionEnabled=!!config.github_connection_preview;
+    if(!config.github_login_configured){
+      status.textContent='GitHub girişi henüz yapılandırılmadı.';
+      return;
+    }
+    const user=await api('/api/v1/me');
+    status.textContent=user.login+' olarak giriş yaptınız. Oturum en geç '+date(user.expires_at)+' tarihinde sona erecek.';
+    logout.hidden=false;
+    byId('create-organization').hidden=false;
+
+    const outcome=new URLSearchParams(location.search).get('connection');
+    if(outcome==='connected')status.textContent+=' Proje bağlandı; ilk koşucu raporu bekleniyor.';
+    else if(outcome==='failed')status.textContent+=' Proje bağlanamadı. App kurulumu, repo yönetici yetkinizi ve seçili hesabı kontrol edip yeniden deneyin.';
+
+    try{
+      const result=await api('/api/v1/organizations');
+      organizations=result.items;
+      if(!organizations.length){
+        status.textContent+=' Henüz bir kuruluşa üye değilsiniz. Yöneticinizin davetini bekleyebilirsiniz.';
+        return;
+      }
+      byId('organization').replaceChildren();
+      for(const org of organizations){
+        const option=document.createElement('option');
+        option.value=org.id;
+        option.textContent=org.name;
+        byId('organization').append(option);
+      }
+      byId('workspace').hidden=false;
+      await loadWorkspace();
+    }catch(error){
+      if(error.message==='session')return;
+      status.textContent+=' Proje ekranı bu ortamda henüz açılmadı.';
+    }
+  }catch(error){
+    if(error.message!=='session')status.textContent='Giriş durumu alınamadı. Sayfayı yenileyerek tekrar deneyin.';
+  }
+}
+
+byId('organization-form').addEventListener('submit',async event=>{
+  event.preventDefault();
+  const button=event.submitter;
+  button.disabled=true;
+  try{
+    await mutate('/api/v1/organizations',{name:byId('organization-name').value});
+    location.replace('/account');
+  }catch{
+    byId('organization-result').textContent='Kuruluş oluşturulamadı. Adı ve oturumunuzu kontrol edin.';
+    button.disabled=false;
+  }
+});
+
+byId('connection-form').addEventListener('submit',async event=>{
+  event.preventDefault();
+  const selected=byId('organization').value;
+  if(!selected||!byId('metadata-consent').checked)return;
+  byId('connect-button').disabled=true;
+  byId('connection-result').textContent='Yetki doğrulaması hazırlanıyor…';
+  try{
+    const result=await mutate('/api/v1/organizations/'+encodeURIComponent(selected)+'/connections/begin',{
+      repo:byId('connection-repo').value.trim(),
+      consent:true,
+      consent_version:'metadata-v1'
+    });
+    const target=new URL(result.authorization_url);
+    if(target.origin!=='https://github.com'||target.pathname!=='/login/oauth/authorize')throw Error();
+    location.assign(target.href);
+  }catch{
+    byId('connection-result').textContent='Bağlantı başlatılamadı. Kuruluş yetkinizi ve oturumunuzu kontrol edin.';
+    byId('connect-button').disabled=false;
+  }
+});
+
+logout.addEventListener('click',async()=>{
+  try{
+    const response=await fetch('/auth/logout',{method:'POST',headers:{'X-CSRF-Token':csrfValue()}});
+    if(!response.ok)throw Error();
+    location.replace('/account');
+  }catch{
+    status.textContent='Çıkış yapılamadı. Yeniden deneyin.';
+  }
+});
+
+byId('organization').addEventListener('change',loadWorkspace);
+byId('refresh').addEventListener('click',loadWorkspace);
+byId('severity').addEventListener('change',loadWorkspace);
+load();
+</script>
+</body>
+</html>

@@ -657,6 +657,12 @@ class OrganizationData:
                 'next_cursor': next_cursor
             }
 
+    def disconnect_repository(self, repo: str) -> dict:
+        with self.access('project.read') as c:
+            self._repo(c, repo)
+        from .identity import Identities
+        return Identities(self.store).remove_repository_ownership(self.organization_id, repo, self.user_id)
+
     def approve_patch(self, repo: str, plan_id: str, baseline_sha: str, diff_sha256: str) -> dict:
         with self.access('finding.triage') as c:
             self._repo(c, repo)
