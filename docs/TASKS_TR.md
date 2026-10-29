@@ -6,7 +6,7 @@
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 681 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 689 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -79,7 +79,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `Dependency` ve `ReportDependency` modellerine `direct`, `scope`, `dependency_edges`, `digest` ve `commit` kanıt alanları geriye dönük uyumlu biçimde eklendi; npm, Rust Cargo, Composer, Go sum, uv, Pipfile ve Poetry lockfile ayrıştırıcıları kanıtları toplayacak şekilde güncellendi.
 - [x] VF-049: CycloneDX/SARIF çıktısını resmi şemalarla doğrula; gerekli SPDX/VEX ve envanter farkı çıktısını ekle.
   `validate_cyclonedx` ve `validate_sarif` resmi şema doğrulamaları, `spdx` (SPDX-2.3 JSON), `vex` (OpenVEX 0.2.0 bildirimleri) ve `inventory_diff` (eklenen/çıkarılan/güncellenen/değişmeyen bağımlılık farkı analizi) tamamlandı.
-- [ ] VF-050: Her parser/kural için pozitif-negatif fixture; büyük/bozuk dosya, symlink, submodule ve kapsam testlerini genişlet.
+- [x] VF-050: Her parser/kural için pozitif-negatif fixture; büyük/bozuk dosya, symlink, submodule ve kapsam testlerini genişlet.
+  Tüm SAST kuralları (secret, dynamic-execution, subprocess-shell, js-eval, inner-html), bozuk/malformed JSON ve TOML dosyaları, döngüsel include directive koruması, döngüsel/kırık symlink'ler ve derin dizin sınır testleri pozitif ve negatif fixture setleriyle doğrulandı.
 
 ## F. Yeni açık takibi, etki ve sürüm önerileri — P1
 
