@@ -29,6 +29,12 @@ class ImpactAssign(BaseModel):
     assigned_to:str|None=Field(default=None,max_length=64)
 
 
+class PatchApprovalRequest(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
+    baseline_sha:str=Field(pattern=r'^[0-9a-f]{40}$')
+    diff_sha256:str=Field(pattern=r'^[0-9a-f]{64}$')
+
+
 class InvitationRequest(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
     github_id:int=Field(gt=0,lt=2**63)
@@ -266,9 +272,16 @@ def install_organization_routes(app,cfg,store):
         return data.rows('dependency_inventory',repo,limit)
 
     @router.get('/remediations')
-    async def remediations(repo:str|None=None,limit:int=Query(50,ge=1,le=100),
+    async def remediations(repo:str|None=None,
+                           status:Literal['all','pending_approval','validated','blocked','published']|None=None,
+                           limit:int=Query(50,ge=1,le=100),
                            cursor:int=Query(0,ge=0),data=Depends(scoped)):
-        return data.rows('remediations',repo,limit,cursor)
+        return data.remediation_plans(repo=repo,status=status,limit=limit,cursor=cursor)
+
+    @router.post('/remediations/{plan_id}/approve',dependencies=[Depends(csrf)])
+    async def approve_patch(plan_id:str,body:PatchApprovalRequest,repo:str=Query(...),data=Depends(scoped)):
+        try: return data.approve_patch(repo,plan_id,body.baseline_sha,body.diff_sha256)
+        except LookupError: raise HTTPException(404,'Plan or repository not found') from None
 
     @router.get('/findings')
     async def findings(repo:str|None=None,status:Literal['open','resolved','false_positive','risk_accepted','suppressed']|None=None,

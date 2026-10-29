@@ -535,6 +535,153 @@ class OrganizationData:
                     {'organization_id':self.organization_id,'scan_id':scan_id})
             return scan
 
+    def remediation_plans(self, repo=None, status=None, limit=50, cursor=0):
+        with self.access('project.read') as c:
+            self._repo(c, repo)
+            if self.store.backend == 'sqlite':
+                try:
+                    self.store._ensure_patch_validations_table(c)
+                    self.store._ensure_patch_approvals_table(c)
+                except Exception:
+                    pass
+
+            # 1. Published remediations
+            sql, args = self.query('remediations')
+            if repo is not None:
+                sql += ' AND x.repo=?'
+                args.append(repo)
+            published_rows = c.execute(sql + ' ORDER BY x.id DESC', args).fetchall()
+            published_items = []
+            published_keys = set()
+            for r in published_rows:
+                r_dict = dict(r)
+                r_dict['status'] = 'published'
+                r_dict['plan_id'] = r_dict['key']
+                published_items.append(r_dict)
+                published_keys.add(r_dict['key'])
+
+            # 2. Validated and pending patch plans
+            v_rows = []
+            try:
+                v_sql, v_args = self.query('repositories', 'x.full_name')
+                if repo is not None:
+                    v_sql += ' AND x.full_name=?'
+                    v_args.append(repo)
+                v_rows = c.execute(
+                    f'''SELECT v.repo, v.plan_id, v.all_checks_passed, v.validated_at, v.evidence
+                        FROM patch_validations v JOIN ({v_sql}) r ON r.full_name=v.repo''',
+                    v_args
+                ).fetchall()
+            except Exception:
+                pass
+
+            categorized = {
+                'pending_approval': [],
+                'validated': [],
+                'blocked': [],
+                'published': published_items
+            }
+
+            for v in v_rows:
+                v_dict = dict(v)
+                p_id = v_dict['plan_id']
+                p_repo = v_dict['repo']
+                evidence = json.loads(v_dict['evidence']) if isinstance(v_dict['evidence'], str) else v_dict['evidence']
+
+                if any(p_id in pk for pk in published_keys):
+                    continue
+
+                appr_row = c.execute(
+                    'SELECT user_id, baseline_sha, diff_sha256, approved_at, status, invalidation_reason FROM patch_approvals WHERE repo=? AND plan_id=?',
+                    (p_repo, p_id)
+                ).fetchone()
+                approval = dict(appr_row) if appr_row else None
+
+                all_passed = bool(v_dict['all_checks_passed'])
+                blockers = list(evidence.get('blockers', []))
+
+                repo_info = c.execute('SELECT last_sha FROM repositories WHERE full_name=?', (p_repo,)).fetchone()
+                current_head = repo_info['last_sha'] if repo_info else None
+                baseline_sha = evidence.get('baseline_sha')
+                if current_head and baseline_sha and current_head != baseline_sha:
+                    blockers.append('baseline_head_drift_detected')
+
+                plan_entry = {
+                    'plan_id': p_id,
+                    'repo': p_repo,
+                    'baseline_sha': baseline_sha,
+                    'validated_at': v_dict['validated_at'],
+                    'all_checks_passed': all_passed,
+                    'approval': approval,
+                    'blockers': sorted(set(blockers)),
+                    'evidence': evidence
+                }
+
+                if not all_passed or blockers:
+                    plan_entry['status'] = 'blocked'
+                    categorized['blocked'].append(plan_entry)
+                elif approval and approval.get('status') == 'approved':
+                    plan_entry['status'] = 'validated'
+                    categorized['validated'].append(plan_entry)
+                else:
+                    plan_entry['status'] = 'pending_approval'
+                    categorized['pending_approval'].append(plan_entry)
+
+            summary = {
+                'pending_approval': len(categorized['pending_approval']),
+                'validated': len(categorized['validated']),
+                'blocked': len(categorized['blocked']),
+                'published': len(categorized['published']),
+                'total': sum(len(lst) for lst in categorized.values())
+            }
+
+            if status and status in categorized:
+                selected_items = categorized[status]
+            else:
+                selected_items = (
+                    categorized['pending_approval'] +
+                    categorized['validated'] +
+                    categorized['blocked'] +
+                    categorized['published']
+                )
+
+            paginated = selected_items[cursor:cursor + limit]
+            truncated = len(selected_items) > cursor + limit
+            next_cursor = cursor + limit if truncated else None
+
+            return {
+                'items': paginated,
+                'summary': summary,
+                'categorized': categorized,
+                'truncated': truncated,
+                'next_cursor': next_cursor
+            }
+
+    def approve_patch(self, repo: str, plan_id: str, baseline_sha: str, diff_sha256: str) -> dict:
+        with self.access('finding.triage') as c:
+            self._repo(c, repo)
+            if self.store.backend == 'sqlite':
+                try:
+                    self.store._ensure_patch_approvals_table(c)
+                except Exception:
+                    pass
+            self.store.record_patch_approval(repo, plan_id, self.user_id, baseline_sha, diff_sha256)
+            self.store.audit_event(
+                repo,
+                None,
+                self.user_id,
+                'patch_approved',
+                {'plan_id': plan_id, 'baseline_sha': baseline_sha, 'diff_sha256': diff_sha256}
+            )
+            return {
+                'plan_id': plan_id,
+                'repo': repo,
+                'status': 'approved',
+                'approved_by': self.user_id,
+                'baseline_sha': baseline_sha,
+                'diff_sha256': diff_sha256
+            }
+
     def impacts(self,repo=None,advisory_id=None,state=None,cursor=0,limit=50,ecosystem=None,package=None,assigned_to=None):
         with self.access('impact.read') as c:
             self._repo(c,repo)

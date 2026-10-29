@@ -124,7 +124,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-074: Etkilenen projeler ve öneriler ekranına sahip atama, toplu filtre ve geçmiş karşılaştırması ekle.
   `OrganizationData.assign_impact` ve `OrganizationData.impact_history` fonksiyonları, REST endpoint'leri (`PATCH /api/v1/organizations/{org_id}/impacts/{impact_id}/assign` ve `GET /impacts/{impact_id}/history`) ve `GET /impacts` sorgusunda ekosistem/paket/sorumlu/durum toplu filtreleri eklendi; revizyon farkları (durum geçişleri, atama değişiklikleri) ve `account.html` sorumlu sütunu tamamlandı.
 - [x] VF-075: False positive, kabul edilen risk ve süreli suppression işlemlerini rollere bağla.
-- [ ] VF-076: Onay bekleyen, doğrulanan, engellenen ve yayımlanan düzeltmeleri ayrı göster.
+- [x] VF-076: Onay bekleyen, doğrulanan, engellenen ve yayımlanan düzeltmeleri ayrı göster.
+  `OrganizationData.remediation_plans` ve `GET /api/v1/organizations/{org_id}/remediations` (status filtresi: `pending_approval`, `validated`, `blocked`, `published`, `all`), `approve_patch` (`POST /remediations/{plan_id}/approve`) onay akışı ve `account.html` tablosu eklenerek onay bekleyen, doğrulanan, engellenen ve yayımlanan düzeltmeler ayrı kategoriler ve özet sayaçlarıyla tamamlandı.
 - [ ] VF-077: Kullanıcıların ayarlayabildiği e-posta/Slack/Teams bildirim entegrasyonları oluştur.
 - [ ] VF-078: Bildirim dedup'u, toplulaştırma, kritik risk escalation'ı ve hassas içerik filtrelerini uygula.
 - [ ] VF-079: API'leri tutarlı v1 şeması, filtreler, cursor, hata kodu, request ID ve mutation idempotency ile tamamla.
