@@ -117,7 +117,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 ## H. Kullanıcı paneli, bildirimler ve API — P1
 
 - [x] VF-071: Organizasyon/repo seçimi, kurulum durumu ve ilk kullanım ekranlarını tamamla.
-- [ ] VF-072: Proje risk özeti, son tarama, kapsam, istihbarat tazeliği ve bağlantı sağlığını göster.
+- [x] VF-072: Proje risk özeti, son tarama, kapsam, istihbarat tazeliği ve bağlantı sağlığını göster.
+  `OrganizationData.project_health` ve REST endpoint'leri (`GET /api/v1/organizations/{org_id}/repositories/{repo}/health` ve `/projects/{repo}/health`) üzerinden; açık/toplam bulgu ve önem dağılımı (risk score/posture), son tarama ve evidence durumu, dosya ve paket kapsamı (files scanned/skipped, coverage %, manifests, ekosistemler), istihbarat tazeliği (advisory impacts, inventory/intelligence age) ve bağlantı/kurulum sağlığı (`installation_id`, runner politikası, sync zamanı) eklendi; `account.html` tablosu genişletildi.
 - [ ] VF-073: Bulgu detayında kanıt, advisory, paket grafı, SHA, geçmiş ve güncelleme alternatiflerini göster.
 - [ ] VF-074: Etkilenen projeler ve öneriler ekranına sahip atama, toplu filtre ve geçmiş karşılaştırması ekle.
 - [x] VF-075: False positive, kabul edilen risk ve süreli suppression işlemlerini rollere bağla.

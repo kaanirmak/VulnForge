@@ -248,6 +248,14 @@ def install_organization_routes(app,cfg,store):
     async def repositories(limit:int=Query(50,ge=1,le=100),data=Depends(scoped)):
         return data.rows('repositories',limit=limit)
 
+    @router.get('/repositories/{repo:path}/health')
+    async def repository_health(repo:str,data=Depends(scoped)):
+        return data.project_health(repo)
+
+    @router.get('/projects/{repo:path}/health')
+    async def project_health(repo:str,data=Depends(scoped)):
+        return data.project_health(repo)
+
     @router.get('/dependencies')
     async def dependencies(repo:str|None=None,limit:int=Query(50,ge=1,le=100),data=Depends(scoped)):
         return data.rows('dependency_inventory',repo,limit)

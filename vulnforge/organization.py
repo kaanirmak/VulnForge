@@ -125,6 +125,159 @@ class OrganizationData:
                 'finding_count': finding_count
             }
 
+    def project_health(self, repo: str) -> dict:
+        with self.access('project.read') as c:
+            self._repo(c, repo)
+            self._expire_suppressions(c)
+
+            # 1. Repo record & connection health
+            sql, args = self.query('repositories', 'x.full_name, x.installation_id, x.default_branch, x.last_sha, x.updated_at')
+            repo_row = c.execute(sql + ' AND x.full_name=?', args + [repo]).fetchone()
+            if repo_row is None:
+                raise ResourceNotFound('Repository not found')
+
+            ownership_row = c.execute(
+                'SELECT granted_by, verification_reference, created_at FROM repository_ownership WHERE repo=? AND organization_id=?',
+                (repo, self.organization_id)
+            ).fetchone()
+
+            runner_configured = False
+            runner_workflow = None
+            try:
+                runner_row = c.execute(
+                    'SELECT enabled, workflow_ref FROM runner_policies WHERE repo=? AND organization_id=?',
+                    (repo, self.organization_id)
+                ).fetchone()
+                if runner_row:
+                    runner_configured = bool(runner_row['enabled'])
+                    runner_workflow = runner_row['workflow_ref']
+            except Exception:
+                pass
+
+            conn_status = 'connected' if repo_row['installation_id'] and repo_row['installation_id'] > 0 else 'pending'
+            connection_health = {
+                'repo': repo,
+                'status': conn_status,
+                'default_branch': repo_row['default_branch'],
+                'last_sha': repo_row['last_sha'],
+                'installation_id': repo_row['installation_id'],
+                'connected_at': ownership_row['created_at'] if ownership_row else None,
+                'runner_policy_configured': runner_configured,
+                'runner_workflow_ref': runner_workflow,
+                'last_sync_at': repo_row['updated_at']
+            }
+
+            # 2. Risk summary
+            sql, args = self.query('findings', 'x.severity, x.status')
+            findings_rows = c.execute(sql + ' AND x.repo=?', args + [repo]).fetchall()
+            severities = {'critical': 0, 'high': 0, 'medium': 0, 'low': 0, 'info': 0}
+            statuses = {'open': 0, 'resolved': 0, 'false_positive': 0, 'risk_accepted': 0, 'suppressed': 0}
+            for f in findings_rows:
+                sev = f['severity']
+                st = f['status']
+                if st in statuses:
+                    statuses[st] += 1
+                if st == 'open' and sev in severities:
+                    severities[sev] += 1
+
+            risk_score = severities['critical'] * 10 + severities['high'] * 5 + severities['medium'] * 2 + severities['low'] * 1
+            posture = ('critical' if severities['critical'] > 0
+                       else 'high' if severities['high'] > 0
+                       else 'medium' if severities['medium'] > 0
+                       else 'low' if severities['low'] > 0
+                       else 'healthy')
+            risk_summary = {
+                'risk_score': risk_score,
+                'posture': posture,
+                'open_findings': statuses['open'],
+                'total_findings': len(findings_rows),
+                'severities': severities,
+                'status_counts': statuses
+            }
+
+            # 3. Latest scan & coverage
+            sql, args = self.query('scans')
+            scan_rows = c.execute(sql + ' AND x.repo=? ORDER BY x.started_at DESC, x.id DESC LIMIT 1', args + [repo]).fetchall()
+            latest_scan = None
+            coverage_data = {
+                'files_total': 0,
+                'files_scanned': 0,
+                'files_skipped': 0,
+                'coverage_percent': 0.0,
+                'manifests': [],
+                'scope': 'unknown',
+                'issues': [],
+                'ecosystems': [],
+                'dependency_count': 0
+            }
+
+            dep_sql, dep_args = self.query('dependency_inventory', 'COUNT(*)')
+            dep_count_row = c.execute(dep_sql + ' AND x.repo=?', dep_args + [repo]).fetchone()
+            coverage_data['dependency_count'] = dep_count_row[0] if dep_count_row else 0
+
+            ecos_sql, ecos_args = self.query('dependency_inventory', 'DISTINCT x.ecosystem')
+            ecos_rows = c.execute(ecos_sql + ' AND x.repo=?', ecos_args + [repo]).fetchall()
+            coverage_data['ecosystems'] = sorted([r[0] for r in ecos_rows if r[0]])
+
+            if scan_rows:
+                latest_scan_item = self.decode(scan_rows, ('coverage', 'dependencies'))[0]
+                from .freshness import assess_scan
+                cov = latest_scan_item.get('coverage') or {}
+                if isinstance(cov, str):
+                    cov = json.loads(cov)
+                latest_scan = {
+                    'id': latest_scan_item['id'],
+                    'kind': latest_scan_item['kind'],
+                    'state': latest_scan_item['state'],
+                    'started_at': latest_scan_item['started_at'],
+                    'finished_at': latest_scan_item.get('finished_at'),
+                    'commit_sha': latest_scan_item.get('commit_sha'),
+                    'evidence_status': assess_scan(latest_scan_item, default_branch=repo_row['default_branch'])
+                }
+                ft = cov.get('files_total', 0)
+                fs = cov.get('files_scanned', 0)
+                fskip = cov.get('files_skipped', 0)
+                coverage_data.update({
+                    'files_total': ft,
+                    'files_scanned': fs,
+                    'files_skipped': fskip,
+                    'coverage_percent': round((fs / ft * 100.0), 1) if ft > 0 else 0.0,
+                    'manifests': cov.get('manifests', []),
+                    'scope': cov.get('scope', 'unknown'),
+                    'issues': cov.get('issues', [])
+                })
+
+            # 4. Intelligence freshness
+            from .freshness import repository_evidence
+            intel_evidence = repository_evidence(c, repo)
+
+            imp_sql, imp_args = self.query('advisory_impacts', 'x.state, COUNT(*)')
+            imp_rows = c.execute(imp_sql + ' AND x.repo=? GROUP BY x.state', imp_args + [repo]).fetchall()
+            impact_counts = {r[0]: r[1] for r in imp_rows}
+
+            intelligence_freshness = {
+                'status': intel_evidence.get('status', 'missing'),
+                'inventory_age': intel_evidence.get('inventory_age', 'unknown'),
+                'intelligence_age': intel_evidence.get('intelligence_age', 'unknown'),
+                'reasons': intel_evidence.get('reasons', []),
+                'inventory_observed_at': intel_evidence.get('inventory_observed_at'),
+                'intelligence_checked_at': intel_evidence.get('intelligence_checked_at'),
+                'advisory_impacts': {
+                    'affected': impact_counts.get('affected', 0),
+                    'not_affected': impact_counts.get('not_affected', 0),
+                    'under_investigation': impact_counts.get('under_investigation', 0)
+                }
+            }
+
+            return {
+                'repo': repo,
+                'risk_summary': risk_summary,
+                'latest_scan': latest_scan,
+                'coverage': coverage_data,
+                'intelligence_freshness': intelligence_freshness,
+                'connection_health': connection_health
+            }
+
     def rows(self,table,repo=None,limit=50,cursor=0,status=None,severity=None):
         permission={'findings':'finding.read','scans':'scan.read'}.get(table,'project.read')
         if table not in TABLES or table=='advisory_impacts': raise ValueError('Unsupported customer table')
@@ -133,7 +286,7 @@ class OrganizationData:
         with self.access(permission) as c:
             self._repo(c,repo)
             if table=='findings': self._expire_suppressions(c)
-            columns=('x.full_name,x.default_branch,x.last_sha,x.updated_at' if table=='repositories' else 'x.*')
+            columns=('x.full_name,x.installation_id,x.default_branch,x.last_sha,x.updated_at' if table=='repositories' else 'x.*')
             sql,args=self.query(table,columns)
             if repo is not None: sql+=f' AND x.{TABLES[table][0]}=?';args.append(repo)
             if table in ('findings','remediations'):
@@ -153,6 +306,8 @@ class OrganizationData:
                     name=item['full_name'] if table=='repositories' else item['repo']
                     if name not in cache: cache[name]=repository_evidence(c,name)
                     item['evidence_status']=cache[name]
+                    if table=='repositories':
+                        item['connection_status']='connected' if item.get('installation_id',0)>0 else 'pending'
                 elif table=='scans': item['evidence_status']=scan_evidence(c,item,cache)
                 elif table=='findings': items[index]=finding_view(c,item,cache)
             # Non-numeric lists are explicitly bounded, never advertised as full.
