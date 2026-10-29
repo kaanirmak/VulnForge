@@ -89,7 +89,8 @@ def build_patch_plan(repo: str, base_branch: str, baseline_sha: str, policy: dic
         return None
     try: path_id(dep.file_path)
     except PrivacyError: return None
-    if dep.file_path.rsplit('/',1)[-1]!='requirements.txt' or any(p.startswith('.') for p in dep.file_path.split('/')):
+    filename = dep.file_path.rsplit('/',1)[-1]
+    if filename not in ('requirements.txt', 'package.json', 'package-lock.json') or any(p.startswith('.') for p in dep.file_path.split('/')):
         return None
     target=None
     if recommendation is not None:
@@ -108,7 +109,24 @@ def build_patch_plan(repo: str, base_branch: str, baseline_sha: str, policy: dic
     manifest_sha256=(hashlib.sha256(manifest_text.encode('utf-8')).hexdigest()
                      if isinstance(manifest_text,str) else None)
     patched_sha256=None
-    if isinstance(manifest_text,str) and target:
+    lockfile_path=None
+    lockfile_sha256=None
+    patched_lockfile_sha256=None
+    if isinstance(files, dict) and target:
+        from .patch_resolver import resolve_manifest_and_lockfile
+        res = resolve_manifest_and_lockfile(files, dep, target)
+        if res.get('success'):
+            manifest_sha256 = res.get('manifest_sha256')
+            patched_sha256 = res.get('updated_manifest_sha256')
+            if res.get('lockfile_path'):
+                lockfile_path = res.get('lockfile_path')
+                lockfile_sha256 = res.get('lockfile_sha256')
+                patched_lockfile_sha256 = res.get('updated_lockfile_sha256')
+        elif isinstance(manifest_text, str):
+            patched = patched_requirement(manifest_text, dep, target)
+            if patched is not None:
+                patched_sha256 = hashlib.sha256(patched.encode('utf-8')).hexdigest()
+    elif isinstance(manifest_text,str) and target:
         patched=patched_requirement(manifest_text,dep,target)
         if patched is not None:
             patched_sha256=hashlib.sha256(patched.encode('utf-8')).hexdigest()
@@ -138,9 +156,12 @@ def build_patch_plan(repo: str, base_branch: str, baseline_sha: str, policy: dic
         'target_version':target,
         'upgrade_class':upgrade,
         'file_path':dep.file_path,
-        'allowed_files':[dep.file_path],
+        'allowed_files':[dep.file_path] if not lockfile_path else [dep.file_path, lockfile_path],
         'manifest_sha256':manifest_sha256,
         'patched_manifest_sha256':patched_sha256,
+        'lockfile_path':lockfile_path,
+        'lockfile_sha256':lockfile_sha256,
+        'patched_lockfile_sha256':patched_lockfile_sha256,
         'advisory_ids':advisory_ids,
         'branch_name':branch_for(dep,key) if target else None,
         'required_checks':list(REQUIRED_CHECKS),

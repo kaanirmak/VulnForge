@@ -105,7 +105,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 
 - [x] VF-061: Repo bazlı düzeltme politikası ve açık opt-in ekle; otomatik birleştirmeyi kapalı tut.
 - [x] VF-062: Paket, mevcut/hedef sürüm, baseline SHA, izinli dosyalar ve gerekli kontrollerle patch planı üret.
-- [ ] VF-063: Python ve npm yamalarında manifest/lockfile'ı gerçek paket yöneticisiyle yeniden çözümle.
+- [x] VF-063: Python ve npm yamalarında manifest/lockfile'ı gerçek paket yöneticisiyle yeniden çözümle.
 - [ ] VF-064: Secret içermeyen, geçici, ağ/dosya/CPU/bellek/süre sınırları olan izole koşucu kur; yönetilen taramalarda da uygula.
 - [ ] VF-065: Unit, integration, build, SAST/SCA tekrar taraması ve envanter farkını kanıt olarak kaydet.
 - [ ] VF-066: Eksik/başarısız doğrulama, riskli dosya, major geçiş ve değişmiş HEAD durumlarında yayını durdur.
