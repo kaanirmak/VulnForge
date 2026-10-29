@@ -363,22 +363,31 @@ class Agent:
 
     async def maybe_propose_patches(self, repo, install, base, checked_head, files,
                                     grouped: dict[Dependency,list[dict]], recommendations=None):
-        from .remediation import build_patch_plans
+        from .remediation import build_patch_plans, evaluate_publication_gate
         policy=self.store.remediation_policy(repo)
         if policy is None:
             self.store.audit_event(repo,None,'system','remediation_blocked',
                 {'reason':'repository_opt_in_required'})
             return []
         plans=build_patch_plans(repo,base,checked_head,policy,files,grouped,recommendations)
+        gated_plans = []
+        for p in plans:
+            ev = self.store.get_patch_validation(repo, p['plan_id'])
+            gate = evaluate_publication_gate(
+                p,
+                validation_evidence=ev,
+                current_head_sha=checked_head,
+                policy=policy
+            )
+            p['publication_allowed'] = gate['publication_allowed']
+            p['blockers'] = sorted(set(p.get('blockers', []) + gate['blockers']))
+            gated_plans.append(p)
         self.store.audit_event(repo,None,'system','remediation_blocked',
             {'reason':'isolated_validation_and_bound_approval_required',
              'baseline_sha':checked_head,
-             'plan_count':len(plans),
-             'plans':plans})
-        # Repository opt-in is necessary but does not prove resolver/build/test
-        # validation or SHA+diff-bound human approval. Keep publication closed
-        # until VF-063–069 provide those proofs.
-        return plans
+             'plan_count':len(gated_plans),
+             'plans':gated_plans})
+        return gated_plans
 
 
 async def run_worker():

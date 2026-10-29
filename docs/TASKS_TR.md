@@ -108,7 +108,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-063: Python ve npm yamalarında manifest/lockfile'ı gerçek paket yöneticisiyle yeniden çözümle.
 - [x] VF-064: Secret içermeyen, geçici, ağ/dosya/CPU/bellek/süre sınırları olan izole koşucu kur; yönetilen taramalarda da uygula.
 - [x] VF-065: Unit, integration, build, SAST/SCA tekrar taraması ve envanter farkını kanıt olarak kaydet.
-- [ ] VF-066: Eksik/başarısız doğrulama, riskli dosya, major geçiş ve değişmiş HEAD durumlarında yayını durdur.
+- [x] VF-066: Eksik/başarısız doğrulama, riskli dosya, major geçiş ve değişmiş HEAD durumlarında yayını durdur.
 - [ ] VF-067: İnsan onayını kullanıcı, repo, SHA ve diff'e bağla; içerik değişince onayı geçersizleştir.
 - [ ] VF-068: Draft PR'a advisory, pre/post sonuçlar, testler ve bilinmeyen riskleri ekle.
 - [ ] VF-069: Branch/PR oluşturma retry'sında mevcut işi uzlaştır; duplicate PR ve insan değişikliğinin üzerine yazmayı engelle.

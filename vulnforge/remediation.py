@@ -174,6 +174,53 @@ def build_patch_plan(repo: str, base_branch: str, baseline_sha: str, policy: dic
     }
 
 
+def evaluate_publication_gate(
+    plan: dict,
+    *,
+    validation_evidence: dict | None = None,
+    current_head_sha: str | None = None,
+    touched_files: list[str] | tuple[str, ...] | None = None,
+    policy: dict | None = None
+) -> dict:
+    """Strict publication gate enforcing validation, safe files, minor/patch only, and head freshness."""
+    blockers = []
+
+    # 1. Validation check
+    if not validation_evidence or not validation_evidence.get('all_checks_passed'):
+        blockers.append('validation_failed_or_missing')
+    elif validation_evidence.get('plan_id') != plan.get('plan_id'):
+        blockers.append('validation_plan_mismatch')
+    elif validation_evidence.get('baseline_sha') != plan.get('baseline_sha'):
+        blockers.append('validation_baseline_mismatch')
+
+    # 2. HEAD drift check
+    if current_head_sha is not None and current_head_sha != plan.get('baseline_sha'):
+        blockers.append('baseline_head_drift_detected')
+
+    # 3. Risky / unauthorized file check
+    files_to_check = set(touched_files or plan.get('allowed_files') or [])
+    allowed = set(policy.get('allowed_files') if policy else plan.get('allowed_files') or [])
+    for f in sorted(files_to_check):
+        if f not in allowed:
+            blockers.append(f'unauthorized_file_modified:{f}')
+        if any(f.startswith(p) or f.endswith(('.sh', '.env', '.exe', '.bat')) for p in ('.github/', '.circleci/', '.gitlab-ci', '.env')):
+            blockers.append(f'risky_file_modified:{f}')
+
+    # 4. Major upgrade check
+    if plan.get('upgrade_class') == 'major':
+        blockers.append('major_upgrade_requires_explicit_review')
+
+    publication_allowed = len(blockers) == 0
+    return {
+        'plan_id': plan.get('plan_id'),
+        'publication_allowed': publication_allowed,
+        'blockers': sorted(set(blockers)),
+        'baseline_sha': plan.get('baseline_sha'),
+        'current_head_sha': current_head_sha,
+        'gate_status': 'passed' if publication_allowed else 'halted'
+    }
+
+
 def build_patch_plans(repo: str, base_branch: str, baseline_sha: str, policy: dict | None,
                       files: dict, grouped: dict[Dependency,list[dict]],
                       recommendations: dict[Dependency,dict] | None = None) -> list[dict]:
