@@ -325,6 +325,120 @@ def format_draft_pr(
     return title, "\n".join(lines)
 
 
+async def reconcile_and_publish_pr(
+    github_client,
+    store,
+    repo: str,
+    installation_id: int,
+    base: str,
+    branch: str,
+    remediation_key: str,
+    file_path: str,
+    old_blob_sha: str,
+    new_content: str,
+    title: str,
+    body: str,
+    *,
+    bot_committer: str = 'VulnForge[bot]'
+) -> dict:
+    """Reconcile and publish a remediation PR idempotently on retry without duplicating or overwriting human work."""
+    from urllib.parse import quote
+    # 1. Check local store first
+    existing = store.get_remediation(repo, remediation_key)
+    if existing and existing.get('url'):
+        return {
+            'status': 'reconciled_existing',
+            'pr_url': existing['url'],
+            'branch': branch,
+            'reconciled': True,
+            'action_taken': 'used_existing_record'
+        }
+
+    # 2. Check if PR already exists on GitHub for this branch
+    existing_prs = []
+    try:
+        existing_prs = await github_client.request(
+            'GET', f"{github_client.repo_path(repo)}/pulls?head={quote(branch)}&state=all", installation_id
+        )
+    except Exception:
+        pass
+
+    if existing_prs and len(existing_prs) > 0:
+        pr = existing_prs[0]
+        pr_url = pr.get('html_url')
+        store.save_remediation(repo, remediation_key, pr_url)
+        if pr.get('merged_at'):
+            return {
+                'status': 'already_merged',
+                'pr_url': pr_url,
+                'branch': branch,
+                'reconciled': True,
+                'action_taken': 'detected_merged_pr'
+            }
+        if pr.get('state') == 'closed':
+            return {
+                'status': 'declined',
+                'pr_url': pr_url,
+                'branch': branch,
+                'reconciled': True,
+                'action_taken': 'preserved_closed_decision'
+            }
+        return {
+            'status': 'reconciled_existing',
+            'pr_url': pr_url,
+            'branch': branch,
+            'reconciled': True,
+            'action_taken': 'reconciled_open_pr'
+        }
+
+    # 3. Check if branch already exists and whether human edits are present
+    branch_exists = False
+    try:
+        ref_data = await github_client.request('GET', f"{github_client.repo_path(repo)}/git/ref/heads/{quote(branch)}", installation_id)
+        if ref_data:
+            branch_exists = True
+    except Exception:
+        branch_exists = False
+
+    if branch_exists:
+        try:
+            commits = await github_client.request('GET', f"{github_client.repo_path(repo)}/commits?sha={quote(branch)}", installation_id)
+            for c in (commits or []):
+                author_login = (c.get('author') or {}).get('login', '')
+                committer_name = ((c.get('commit') or {}).get('committer') or {}).get('name', '')
+                if author_login and 'bot' not in author_login.lower() and committer_name != bot_committer:
+                    return {
+                        'status': 'human_changes_preserved',
+                        'pr_url': None,
+                        'branch': branch,
+                        'reconciled': True,
+                        'action_taken': 'aborted_to_avoid_overwriting_human_commits'
+                    }
+        except Exception:
+            pass
+
+    # 4. Safe creation
+    pr_url = await github_client.create_fix_pr(
+        repo=repo,
+        installation_id=installation_id,
+        base=base,
+        branch=branch,
+        path=file_path,
+        old_sha=old_blob_sha,
+        new_text=new_content,
+        title=title,
+        body=body
+    )
+    store.save_remediation(repo, remediation_key, pr_url)
+    return {
+        'status': 'created',
+        'pr_url': pr_url,
+        'branch': branch,
+        'reconciled': False,
+        'action_taken': 'created_new_draft_pr'
+    }
+
+
 def build_patch_plans(repo: str, base_branch: str, baseline_sha: str, policy: dict | None,
                       files: dict, grouped: dict[Dependency,list[dict]],
                       recommendations: dict[Dependency,dict] | None = None) -> list[dict]:

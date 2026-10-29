@@ -1015,6 +1015,11 @@ class Store:
         with self.conn() as c:
             return c.execute("SELECT 1 FROM remediations WHERE repo=? AND key=?", (repo,key)).fetchone() is not None
 
+    def get_remediation(self, repo: str, key: str) -> dict | None:
+        with self.conn() as c:
+            row = c.execute("SELECT * FROM remediations WHERE repo=? AND key=?", (repo,key)).fetchone()
+            return dict(row) if row else None
+
     def remediation_policy(self,repo):
         with self.conn() as c:
             row=c.execute('''SELECT p.* FROM remediation_policies p
