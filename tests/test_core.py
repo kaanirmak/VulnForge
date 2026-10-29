@@ -1,11 +1,18 @@
 from vulnforge.scanner import (
     FINDING_SCHEMA_VERSION,
+    PINNED_SEMGREP_VERSION,
+    SEMGREP_RULEPACK_CONTENT,
+    SEMGREP_RULEPACK_ID,
+    SEMGREP_RULEPACK_SHA256,
     compute_fingerprint,
     normalize_finding,
     normalize_severity,
+    parse_semgrep_json,
+    run_semgrep_adapter,
     runner_fingerprint,
     scan_code,
     to_runner_finding,
+    verify_semgrep_contract,
 )
 from vulnforge.dependencies import parse_manifest, Dependency
 from vulnforge.remediation import patched_requirement, candidate_version, branch_for
@@ -124,3 +131,70 @@ def test_queue_is_durable_and_retries(tmp_path):
     assert store.list_rows('findings')[0]['status']=='open'
     store.resolve_missing_dependencies('o/r',set())
     assert store.list_rows('findings')[0]['status']=='resolved'
+
+
+def test_semgrep_adapter_pins_rulepack_and_tool_version_and_strips_source(tmp_path):
+    import json, pytest
+    checkout=tmp_path/'checkout';checkout.mkdir()
+    rulepack=tmp_path/'rulepack.json'
+    rulepack.write_text(SEMGREP_RULEPACK_CONTENT,encoding='utf-8')
+    contract=verify_semgrep_contract(f'semgrep {PINNED_SEMGREP_VERSION}\n',rulepack_path=rulepack)
+    assert contract['version']==PINNED_SEMGREP_VERSION
+    assert contract['rulepack_id']==SEMGREP_RULEPACK_ID
+    assert contract['rulepack_sha256']==SEMGREP_RULEPACK_SHA256
+
+    with pytest.raises(ValueError):
+        verify_semgrep_contract('semgrep 1.95.0',rulepack_path=rulepack)
+    with pytest.raises(ValueError):
+        verify_semgrep_contract(PINNED_SEMGREP_VERSION,rulepack_path='p/default')
+    bad_pack=tmp_path/'bad.json';bad_pack.write_text('{}',encoding='utf-8')
+    with pytest.raises(ValueError):
+        verify_semgrep_contract(PINNED_SEMGREP_VERSION,rulepack_path=bad_pack)
+
+    commands=[]
+    def fake_runner(cmd):
+        commands.append(cmd)
+        if '--version' in cmd:
+            return PINNED_SEMGREP_VERSION
+        return json.dumps({
+            'version':PINNED_SEMGREP_VERSION,
+            'results':[
+                {
+                    'check_id':'rules.vulnforge.python.dynamic-execution',
+                    'path':'src/handler.py',
+                    'start':{'line':19},
+                    'extra':{
+                        'severity':'ERROR',
+                        'message':'Dynamic Python evaluation can execute attacker-controlled input',
+                        'lines':'eval(super_secret_source_code_snippet)',
+                    },
+                },
+                {
+                    'check_id':'vulnforge.javascript.inner-html',
+                    'path':'web/ui.js',
+                    'start':{'line':7},
+                    'extra':{
+                        'severity':'WARNING',
+                        'message':'HTML sink; verify input escaping/sanitization',
+                        'lines':'el.innerHTML = untrusted_html',
+                    },
+                },
+            ],
+        })
+    findings=run_semgrep_adapter(checkout,semgrep_bin='/opt/semgrep/bin/semgrep',
+                                 rulepack_path=rulepack,runner=fake_runner)
+    assert len(findings)==2
+    assert '--metrics=off' in commands[1] and '--disable-version-check' in commands[1]
+    assert findings[0]['scanner']=='semgrep'
+    assert findings[0]['severity']=='high'
+    assert findings[0]['details']['rule']=='dynamic-execution'
+    assert findings[0]['details']['tool_version']==PINNED_SEMGREP_VERSION
+    assert findings[0]['details']['rulepack_sha256']==SEMGREP_RULEPACK_SHA256
+    assert 'super_secret_source_code_snippet' not in json.dumps(findings)
+    runner_f=to_runner_finding(findings[0])
+    assert runner_f['rule_id']=='dynamic-execution' and runner_f['line']==19
+
+    with pytest.raises(ValueError):
+        parse_semgrep_json({'version':'0.99.0','results':[]})
+    with pytest.raises(ValueError):
+        run_semgrep_adapter(checkout,semgrep_bin=checkout/'bin/semgrep',rulepack_path=rulepack,runner=fake_runner)

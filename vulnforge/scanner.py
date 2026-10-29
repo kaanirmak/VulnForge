@@ -1,9 +1,58 @@
 """Small, transparent static rule set and canonical finding/fingerprint normalizer."""
 import ast
 import hashlib
+import json
+from pathlib import Path
 import re
+import subprocess
 
 FINDING_SCHEMA_VERSION = '1'
+PINNED_SEMGREP_VERSION = '1.96.0'
+SEMGREP_RULEPACK_ID = 'vulnforge-default-v1'
+SEMGREP_RULEPACK_CONTENT = json.dumps({
+    'rules': [
+        {
+            'id': 'vulnforge.python.dynamic-execution',
+            'languages': ['python'],
+            'severity': 'ERROR',
+            'message': 'Dynamic Python evaluation can execute attacker-controlled input',
+            'pattern-either': [{'pattern': 'eval(...)'}, {'pattern': 'exec(...)'}],
+        },
+        {
+            'id': 'vulnforge.python.subprocess-shell',
+            'languages': ['python'],
+            'severity': 'WARNING',
+            'message': 'Subprocess invoked with shell=True',
+            'pattern': 'subprocess.$FUNC(..., shell=True, ...)',
+        },
+        {
+            'id': 'vulnforge.javascript.js-eval',
+            'languages': ['javascript', 'typescript'],
+            'severity': 'ERROR',
+            'message': 'JavaScript eval() usage',
+            'pattern': 'eval(...)',
+        },
+        {
+            'id': 'vulnforge.javascript.inner-html',
+            'languages': ['javascript', 'typescript'],
+            'severity': 'WARNING',
+            'message': 'HTML sink; verify input escaping/sanitization',
+            'pattern': '$EL.innerHTML = $VAL',
+        },
+    ]
+}, sort_keys=True, separators=(',', ':'))
+SEMGREP_RULEPACK_SHA256 = hashlib.sha256(SEMGREP_RULEPACK_CONTENT.encode()).hexdigest()
+
+SEMGREP_CHECK_ID_MAP = {
+    'vulnforge.python.dynamic-execution': 'dynamic-execution',
+    'python.lang.security.audit.eval-detected': 'dynamic-execution',
+    'vulnforge.python.subprocess-shell': 'subprocess-shell',
+    'python.lang.security.audit.subprocess-shell-true': 'subprocess-shell',
+    'vulnforge.javascript.js-eval': 'js-eval',
+    'javascript.browser.security.eval-detected': 'js-eval',
+    'vulnforge.javascript.inner-html': 'inner-html',
+    'javascript.browser.security.innerhtml': 'inner-html',
+}
 
 SEVERITY_MAP = {
     'critical': 'critical',
@@ -290,3 +339,123 @@ def scan_code(path: str, source: str):
                     '[CODE OMITTED; inspect referenced line]',
                     line_signature=_line_sig('inner-html', title, line)))
     return results
+
+
+def map_semgrep_rule_id(check_id: str) -> str:
+    if not isinstance(check_id, str) or not check_id.strip():
+        raise ValueError('Semgrep check_id is required')
+    cleaned = check_id.strip()
+    if cleaned in SEMGREP_CHECK_ID_MAP:
+        return SEMGREP_CHECK_ID_MAP[cleaned]
+    for suffix, canonical in SEMGREP_CHECK_ID_MAP.items():
+        if cleaned.endswith('.' + suffix) or cleaned.endswith('/' + suffix):
+            return canonical
+    if cleaned in ('hardcoded-secret', 'dynamic-execution', 'subprocess-shell', 'js-eval', 'inner-html'):
+        return cleaned
+    raise ValueError(f'Unapproved Semgrep rule check_id: {cleaned}')
+
+
+def verify_semgrep_contract(version_output: str, *, rulepack_path: str | Path | None = None,
+                            expected_version: str = PINNED_SEMGREP_VERSION,
+                            expected_rulepack_sha256: str = SEMGREP_RULEPACK_SHA256) -> dict:
+    if not isinstance(version_output, str):
+        raise ValueError('Semgrep version output is required')
+    m = re.search(r'\b(\d+\.\d+\.\d+)\b', version_output.strip())
+    if not m or m.group(1) != expected_version:
+        raise ValueError(f'Semgrep version mismatch: expected {expected_version}')
+    actual_sha = expected_rulepack_sha256
+    if rulepack_path is not None:
+        raw_path = str(rulepack_path)
+        if '://' in raw_path or raw_path.startswith(('p/', 'r/')):
+            raise ValueError('Remote Semgrep registry configs are forbidden; use a pinned local rulepack')
+        resolved = Path(rulepack_path).resolve(strict=True)
+        actual_sha = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        if actual_sha != expected_rulepack_sha256:
+            raise ValueError('Semgrep rulepack SHA-256 checksum mismatch')
+    return {
+        'tool': 'semgrep',
+        'version': expected_version,
+        'rulepack_id': SEMGREP_RULEPACK_ID,
+        'rulepack_sha256': actual_sha,
+    }
+
+
+def parse_semgrep_json(payload: dict | str | bytes, *,
+                       expected_version: str = PINNED_SEMGREP_VERSION,
+                       rulepack_sha256: str = SEMGREP_RULEPACK_SHA256) -> list[dict]:
+    from .privacy import path_id
+    if isinstance(payload, (str, bytes)):
+        data = json.loads(payload)
+    elif isinstance(payload, dict):
+        data = payload
+    else:
+        raise ValueError('Invalid Semgrep JSON payload')
+    version = data.get('version')
+    if version is not None and str(version).strip() != expected_version:
+        raise ValueError(f'Semgrep output version mismatch: expected {expected_version}')
+    raw_results = data.get('results')
+    if not isinstance(raw_results, list):
+        raise ValueError('Semgrep JSON payload missing results list')
+    findings = []
+    for item in raw_results:
+        if not isinstance(item, dict):
+            raise ValueError('Invalid Semgrep result entry')
+        rel_path = item.get('path')
+        path_id(rel_path)
+        start = item.get('start') or {}
+        line = start.get('line')
+        if type(line) is not int or line < 1:
+            raise ValueError('Semgrep finding requires a positive integer start.line')
+        extra = item.get('extra') or {}
+        raw_check_id = item.get('check_id', '')
+        rule = map_semgrep_rule_id(raw_check_id)
+        severity = normalize_severity(str(extra.get('severity', 'WARNING')))
+        message = str(extra.get('message') or f'Semgrep {rule} match').strip()
+        findings.append(normalize_finding(
+            category='code',
+            severity=severity,
+            title=message,
+            file_path=rel_path,
+            line=line,
+            rule=rule,
+            snippet='[CODE OMITTED; inspect referenced line]',
+            scanner='semgrep',
+            details={
+                'semgrep_check_id': str(raw_check_id),
+                'tool_version': expected_version,
+                'rulepack_id': SEMGREP_RULEPACK_ID,
+                'rulepack_sha256': rulepack_sha256,
+                'line_signature': _line_sig(rule, message),
+            },
+        ))
+    return findings
+
+
+def run_semgrep_adapter(target_root: str | Path, *, semgrep_bin: str | Path,
+                        rulepack_path: str | Path,
+                        expected_version: str = PINNED_SEMGREP_VERSION,
+                        expected_rulepack_sha256: str = SEMGREP_RULEPACK_SHA256,
+                        runner=None) -> list[dict]:
+    root = Path(target_root).resolve(strict=True)
+    binary = Path(semgrep_bin)
+    if not binary.is_absolute():
+        raise ValueError('Semgrep binary path must be absolute')
+    if str(binary).startswith(str(root) + '/'):
+        raise ValueError('Semgrep binary must reside outside target checkout')
+    exec_fn = runner or (lambda cmd: subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60).stdout)
+    ver_out = exec_fn([str(binary), '--version'])
+    contract = verify_semgrep_contract(
+        ver_out,
+        rulepack_path=rulepack_path,
+        expected_version=expected_version,
+        expected_rulepack_sha256=expected_rulepack_sha256,
+    )
+    scan_out = exec_fn([
+        str(binary), 'scan', '--json', '--metrics=off', '--disable-version-check',
+        '--config', str(Path(rulepack_path).resolve(strict=True)), str(root),
+    ])
+    return parse_semgrep_json(
+        scan_out,
+        expected_version=contract['version'],
+        rulepack_sha256=contract['rulepack_sha256'],
+    )
