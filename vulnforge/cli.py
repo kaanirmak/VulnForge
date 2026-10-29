@@ -16,7 +16,7 @@ from .privacy import path_id
 from .runner_report import RunnerReport,ReportDependency,parse_report
 from .scanner import scan_code,to_runner_finding
 
-MANIFESTS=frozenset(('requirements.txt','package-lock.json','poetry.lock','Cargo.lock','composer.lock','go.mod','uv.lock','Pipfile.lock'))
+MANIFESTS=frozenset(('requirements.txt','package-lock.json','poetry.lock','Cargo.lock','composer.lock','go.mod','uv.lock','Pipfile.lock','pnpm-lock.yaml','pnpm-lock.yml','yarn.lock'))
 CODE_SUFFIXES=('.py','.js','.jsx','.ts','.tsx','.env','.json','.yaml','.yml','.toml')
 EXCLUDED=frozenset(('.git','.hg','.svn','node_modules','.venv','venv','__pycache__','.tox'))
 MAX_FILE_BYTES=300_000

@@ -6,7 +6,7 @@
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 673 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 674 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -71,7 +71,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-044: PR base/head karşılaştırmasıyla yeni ve önceden mevcut bulguları ayır.
 - [x] VF-045: Python için extras/marker/include ve çözümlenmiş dolaylı bağımlılıkları güvenilir biçimde envantere al.
   PEP 508 extras/markers ayrıştırma, hash ve satır devamı temizleme, `-r`/`-c` özyinelemeli include desteği, `uv.lock` ve `Pipfile.lock` tam çözümlenmiş envanter ayrıştırma ve yerel/git bağımlılık doğrulamaları tamamlandı.
-- [ ] VF-046: npm workspaces/alias/link, pnpm ve Yarn kilit dosyalarını destekle.
+- [x] VF-046: npm workspaces/alias/link, pnpm ve Yarn kilit dosyalarını destekle.
+  `package-lock.json` workspace linkleri ve npm alias çözümlemesi, `pnpm-lock.yaml` (v5/v6/v9 scoped, peer deps, link tespiti) ve `yarn.lock` (v1 ve v2/Berry resolution/portal kontrolleri) saf Python parser'ları ile CLI ve envanter motoruna eklendi.
 - [ ] VF-047: Go build listesi, Rust workspace/git ve Composer paket kaynaklarını doğru ayır; çözümleyicileri yalnız izole ortamda çalıştır.
 - [ ] VF-048: Doğrudan/dolaylı, runtime/dev, dependency edge ve commit/digest kanıtlarını modele ekle.
 - [ ] VF-049: CycloneDX/SARIF çıktısını resmi şemalarla doğrula; gerekli SPDX/VEX ve envanter farkı çıktısını ekle.

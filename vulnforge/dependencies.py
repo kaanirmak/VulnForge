@@ -61,6 +61,137 @@ def parse_python_requirement_line(raw: str) -> tuple[str, str] | None:
     return None
 
 
+def parse_yarn_lock(path: str, content: str) -> tuple[list[Dependency], list[dict]]:
+    deps: list[Dependency] = []
+    issues: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    current_names: list[str] = []
+    current_version: str | None = None
+    current_resolution: str | None = None
+    is_link_or_portal = False
+
+    def finish_block():
+        nonlocal current_names, current_version, current_resolution, is_link_or_portal
+        if current_names:
+            if is_link_or_portal:
+                for name in current_names:
+                    issues.append({'path': path, 'package': name, 'reason': 'unresolved_or_local_package'})
+            elif current_version:
+                for name in current_names:
+                    real_name = name
+                    if current_resolution and '@npm:' in current_resolution:
+                        res_clean = current_resolution.strip('"\'')
+                        res_pkg = res_clean.split('@npm:')[0].lstrip('/')
+                        if res_pkg:
+                            real_name = res_pkg
+                    pair = (real_name, current_version)
+                    if pair not in seen:
+                        seen.add(pair)
+                        deps.append(Dependency(real_name, current_version, 'npm', path))
+        current_names = []
+        current_version = None
+        current_resolution = None
+        is_link_or_portal = False
+
+    for line in content.splitlines():
+        trimmed = line.strip()
+        if not trimmed or trimmed.startswith('#'):
+            continue
+        if not line.startswith(' ') and not line.startswith('\t') and trimmed.endswith(':'):
+            finish_block()
+            header = trimmed.rstrip(':')
+            if header in ('__metadata', 'version'):
+                continue
+            for raw_spec in header.split(','):
+                spec = raw_spec.strip().strip('"\'')
+                if not spec:
+                    continue
+                # Handle yarn berry alias: e.g. "alias-pkg@npm:target-pkg@^1.0.0"
+                if '@npm:' in spec:
+                    parts = spec.split('@npm:', 1)
+                    target_part = parts[1]
+                    if '@' in target_part:
+                        pkg_name = target_part.rsplit('@', 1)[0]
+                    else:
+                        pkg_name = target_part
+                elif spec.startswith('@'):
+                    parts = spec[1:].split('@', 1)
+                    pkg_name = '@' + parts[0]
+                else:
+                    pkg_name = spec.split('@', 1)[0]
+                if pkg_name and pkg_name not in current_names:
+                    current_names.append(pkg_name)
+        else:
+            if trimmed.startswith('version'):
+                parts = trimmed.split(None, 1) if ' ' in trimmed else trimmed.split(':', 1)
+                if len(parts) == 2:
+                    val = parts[1].strip().strip('"\'')
+                    if val.startswith(':'):
+                        val = val[1:].strip().strip('"\'')
+                    current_version = val
+            elif trimmed.startswith('resolution:'):
+                current_resolution = trimmed.split(':', 1)[1].strip().strip('"\'')
+                if any(x in current_resolution for x in ('link:', 'portal:', 'file:')):
+                    is_link_or_portal = True
+            elif any(trimmed.startswith(k) for k in ('link:', 'portal:', 'file:')):
+                is_link_or_portal = True
+
+    finish_block()
+    return deps, issues
+
+
+def parse_pnpm_lock(path: str, content: str) -> tuple[list[Dependency], list[dict]]:
+    deps: list[Dependency] = []
+    issues: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    in_packages = False
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        if not line.startswith(' ') and not line.startswith('\t'):
+            if stripped.startswith('packages:'):
+                in_packages = True
+            else:
+                in_packages = False
+            continue
+
+        if in_packages:
+            indent = len(line) - len(line.lstrip())
+            if indent == 2 and stripped.endswith(':'):
+                key = stripped.rstrip(':').strip('\'"')
+                key = key.lstrip('/')
+                if 'link:' in key or 'file:' in key:
+                    issues.append({'path': path, 'package': key, 'reason': 'unresolved_or_local_package'})
+                    continue
+                if '(' in key:
+                    key = key.split('(', 1)[0]
+                if '_' in key and '@' in key:
+                    parts = key.split('_')
+                    key = parts[0]
+                if '@' in key:
+                    if key.startswith('@'):
+                        scope_parts = key[1:].rsplit('@', 1)
+                        if len(scope_parts) == 2:
+                            pkg_name = '@' + scope_parts[0]
+                            version = scope_parts[1]
+                        else:
+                            pkg_name, version = key, ''
+                    else:
+                        pkg_name, version = key.rsplit('@', 1)
+                    version = version.split('(')[0].strip()
+                    if pkg_name and version:
+                        pair = (pkg_name, version)
+                        if pair not in seen:
+                            seen.add(pair)
+                            deps.append(Dependency(pkg_name, version, 'npm', path))
+
+    return deps, issues
+
+
 def parse_manifest(path: str, content: str, *, include_resolver=None, _visited=None) -> list[Dependency]:
     name = path.rsplit('/', 1)[-1]
     packages: list[Dependency] = []
@@ -96,9 +227,11 @@ def parse_manifest(path: str, content: str, *, include_resolver=None, _visited=N
         obj = json.loads(content)
         # lockfile v2/v3: packages contains transitive resolved versions.
         for key, entry in obj.get('packages',{}).items():
-            if not key or 'node_modules/' not in key or not isinstance(entry,dict):
+            if not key or not isinstance(entry,dict):
                 continue
-            pkg = key.split('node_modules/')[-1]
+            if 'node_modules/' not in key and not entry.get('name'):
+                continue
+            pkg = entry.get('name') or key.split('node_modules/')[-1]
             if entry.get('version') and not entry.get('link'):
                 add(pkg,entry['version'],'npm')
         # Old lockfile v1: recursively walk dependency tree.
@@ -109,6 +242,12 @@ def parse_manifest(path: str, content: str, *, include_resolver=None, _visited=N
                         add(pkg,info.get('version'),'npm')
                         walk(info.get('dependencies',{}))
             walk(obj.get('dependencies',{}))
+    elif name in ('pnpm-lock.yaml', 'pnpm-lock.yml'):
+        p_deps, _ = parse_pnpm_lock(path, content)
+        packages.extend(p_deps)
+    elif name == 'yarn.lock':
+        y_deps, _ = parse_yarn_lock(path, content)
+        packages.extend(y_deps)
     elif name == 'poetry.lock':
         obj = tomllib.loads(content)
         for item in obj.get('package',[]):
@@ -198,7 +337,7 @@ def inventory_manifest(path: str, content: str, *, include_resolver=None) -> Inv
         for key, item in obj.get('packages', {}).items():
             if key and (not isinstance(item, dict) or not item.get('version') or item.get('link')):
                 issues.append({'path': path, 'reason': 'unresolved_or_local_package'})
-            if key and 'node_modules/' not in key:
+            if key and 'node_modules/' not in key and not item.get('name'):
                 issues.append({'path':path,'reason':'workspace_package_not_registry_resolved'})
         if not obj.get('packages'):
             def check_tree(tree):
@@ -210,6 +349,20 @@ def inventory_manifest(path: str, content: str, *, include_resolver=None) -> Inv
             check_tree(obj.get('dependencies',{}))
         if obj.get('lockfileVersion') not in (1, 2, 3):
             issues.append({'path': path, 'reason': 'unsupported_lockfile_version'})
+    elif name in ('pnpm-lock.yaml', 'pnpm-lock.yml'):
+        if 'lockfileVersion' not in content:
+            issues.append({'path': path, 'reason': 'missing_lockfile_inventory'})
+        p_deps, p_issues = parse_pnpm_lock(path, content)
+        deps.extend(p_deps)
+        issues.extend(p_issues)
+        if not p_deps and not p_issues and content.strip():
+            issues.append({'path': path, 'reason': 'missing_package_inventory'})
+    elif name == 'yarn.lock':
+        y_deps, y_issues = parse_yarn_lock(path, content)
+        deps.extend(y_deps)
+        issues.extend(y_issues)
+        if not y_deps and not y_issues and content.strip():
+            issues.append({'path': path, 'reason': 'missing_package_inventory'})
     elif name in ('poetry.lock', 'Cargo.lock', 'uv.lock'):
         obj = tomllib.loads(content)
         if 'package' not in obj:
