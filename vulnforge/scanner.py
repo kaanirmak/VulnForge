@@ -469,7 +469,8 @@ def run_semgrep_adapter(target_root: str | Path, *, semgrep_bin: str | Path,
         raise ValueError('Semgrep binary path must be absolute')
     if str(binary).startswith(str(root) + '/'):
         raise ValueError('Semgrep binary must reside outside target checkout')
-    exec_fn = runner or (lambda cmd: subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60).stdout)
+    from .isolated_runner import IsolatedRunner
+    exec_fn = runner or IsolatedRunner().managed_scan_runner()
     ver_out = exec_fn([str(binary), '--version'])
     contract = verify_semgrep_contract(
         ver_out,
@@ -571,7 +572,8 @@ def run_gitleaks_adapter(target_root: str | Path, *, gitleaks_bin: str | Path,
         raise ValueError('Gitleaks binary path must be absolute')
     if str(binary).startswith(str(root) + '/'):
         raise ValueError('Gitleaks binary must reside outside target checkout')
-    exec_fn = runner or (lambda cmd: subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60).stdout)
+    from .isolated_runner import IsolatedRunner
+    exec_fn = runner or IsolatedRunner().managed_scan_runner()
     try:
         ver_out = exec_fn([str(binary), 'version'])
         contract = verify_gitleaks_contract(
