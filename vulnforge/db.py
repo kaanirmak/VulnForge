@@ -833,6 +833,38 @@ class Store:
             c.execute('UPDATE unfixed_mitigations SET next_recheck_at=?, status=?, history=? WHERE repo=? AND advisory_id=?',
                       (next_recheck, status, json.dumps(history, sort_keys=True), repo, advisory_id))
 
+    def _ensure_patch_validations_table(self, c):
+        c.execute('''CREATE TABLE IF NOT EXISTS patch_validations (
+            repo TEXT NOT NULL,
+            plan_id TEXT NOT NULL,
+            all_checks_passed INTEGER NOT NULL,
+            validated_at REAL NOT NULL,
+            evidence TEXT NOT NULL,
+            PRIMARY KEY(repo, plan_id)
+        )''')
+
+    def save_patch_validation(self, repo: str, plan_id: str, evidence: dict):
+        all_passed = 1 if evidence.get('all_checks_passed') else 0
+        validated_at = float(evidence.get('validated_at', time.time()))
+        ev_str = json.dumps(evidence, sort_keys=True)
+        with self.transaction(), self.conn() as c:
+            self._ensure_patch_validations_table(c)
+            c.execute('''INSERT INTO patch_validations(repo, plan_id, all_checks_passed, validated_at, evidence)
+                VALUES(?,?,?,?,?)
+                ON CONFLICT(repo, plan_id) DO UPDATE SET
+                all_checks_passed=excluded.all_checks_passed,
+                validated_at=excluded.validated_at,
+                evidence=excluded.evidence''',
+                (repo, plan_id, all_passed, validated_at, ev_str))
+
+    def get_patch_validation(self, repo: str, plan_id: str) -> dict | None:
+        with self.conn() as c:
+            self._ensure_patch_validations_table(c)
+            row = c.execute('SELECT * FROM patch_validations WHERE repo=? AND plan_id=?', (repo, plan_id)).fetchone()
+            if not row:
+                return None
+            return json.loads(row['evidence']) if isinstance(row['evidence'], str) else row['evidence']
+
     def pending_impact(self, repo, advisory_id, delivery):
         advisory=self.advisory(advisory_id)
         state='withdrawn' if advisory['withdrawn'] else 'under_investigation'
