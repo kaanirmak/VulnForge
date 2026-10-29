@@ -11,6 +11,7 @@ from .privacy import MetadataPolicy, PrivacyError
 
 @dataclass(frozen=True)
 class Config:
+    environment: str = "development"
     webhook_secret: str = ""
     admin_token: str = field(default='',repr=False)
     operator_credentials: tuple[tuple[str,str],...] = field(default=(),repr=False)
@@ -46,6 +47,21 @@ class Config:
     runner_trusted_workflows: tuple[str,...] = ()
 
     def __post_init__(self):
+        if self.environment not in ('development', 'staging', 'production'):
+            raise ValueError(f"Invalid environment: {self.environment}. Must be one of: development, staging, production")
+
+        if self.environment == 'production':
+            if self.allow_insecure_local_auth:
+                raise ValueError('Insecure local auth is strictly forbidden in production')
+            if not self.database_url or not self.customer_database_url or not self.worker_database_url:
+                raise ValueError('Production environment requires separated PostgreSQL database URLs for operator, customer, and worker')
+            if not self.webhook_secret or len(self.webhook_secret) < 32:
+                raise ValueError('Production environment requires a high-entropy webhook secret of at least 32 characters')
+            if self.admin_token and len(self.admin_token) < 32:
+                raise ValueError('Production admin token must be at least 32 characters')
+            if self.public_origin and (self.public_origin.startswith('http://') or any(h in self.public_origin for h in ('localhost', '127.0.0.1', '::1'))):
+                raise ValueError('Production public origin must use HTTPS and cannot be a loopback address')
+
         if not isinstance(self.operator_credentials,tuple): raise ValueError('Invalid operator credential configuration')
         operators=set();tokens=set()
         for item in self.operator_credentials:
@@ -108,6 +124,18 @@ class Config:
             raise ValueError('Runner identity preview requires loopback customer-runner mode and trusted workflows')
 
     @property
+    def is_production(self) -> bool:
+        return self.environment == 'production'
+
+    @property
+    def is_staging(self) -> bool:
+        return self.environment == 'staging'
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment == 'development'
+
+    @property
     def oauth_enabled(self):
         return bool(self.github_oauth_client_id and self.github_oauth_client_secret and self.public_origin)
 
@@ -144,6 +172,7 @@ class Config:
             credentials=tuple(raw.items())
         except (ValueError,TypeError): raise ValueError('Invalid OPERATOR_CREDENTIALS configuration') from None
         return cls(
+            environment=getenv("VULNFORGE_ENV", getenv("ENVIRONMENT", "development")).lower(),
             webhook_secret=getenv("WEBHOOK_SECRET", ""),
             admin_token=getenv("ADMIN_TOKEN", ""),
             operator_credentials=credentials,
@@ -182,3 +211,31 @@ class Config:
         if not self.private_key_path:
             raise ValueError("GITHUB_PRIVATE_KEY_PATH is not configured")
         return Path(self.private_key_path).read_text(encoding="utf-8")
+
+
+def validate_cross_environment_isolation(configs: dict[str, 'Config']) -> None:
+    """Ensure development, staging, and production environments do not share credentials, databases, or keys."""
+    envs = list(configs.keys())
+    for i in range(len(envs)):
+        for j in range(i + 1, len(envs)):
+            env1, env2 = envs[i], envs[j]
+            c1, c2 = configs[env1], configs[env2]
+            # Check database isolation
+            if c1.database_url and c1.database_url == c2.database_url:
+                raise ValueError(f"Environment separation violation: {env1} and {env2} share the same database_url")
+            if c1.customer_database_url and c1.customer_database_url == c2.customer_database_url:
+                raise ValueError(f"Environment separation violation: {env1} and {env2} share the same customer_database_url")
+            if c1.worker_database_url and c1.worker_database_url == c2.worker_database_url:
+                raise ValueError(f"Environment separation violation: {env1} and {env2} share the same worker_database_url")
+            # Check secret and key isolation
+            if c1.webhook_secret and c1.webhook_secret == c2.webhook_secret:
+                raise ValueError(f"Environment separation violation: {env1} and {env2} share the same webhook_secret")
+            if c1.admin_token and c1.admin_token == c2.admin_token:
+                raise ValueError(f"Environment separation violation: {env1} and {env2} share the same admin_token")
+            if c1.github_oauth_client_id and c1.github_oauth_client_id == c2.github_oauth_client_id:
+                raise ValueError(f"Environment separation violation: {env1} and {env2} share the same github_oauth_client_id")
+            if c1.github_oauth_client_secret and c1.github_oauth_client_secret == c2.github_oauth_client_secret:
+                raise ValueError(f"Environment separation violation: {env1} and {env2} share the same github_oauth_client_secret")
+            if c1.operator_report_token and c1.operator_report_token == c2.operator_report_token:
+                raise ValueError(f"Environment separation violation: {env1} and {env2} share the same operator_report_token")
+

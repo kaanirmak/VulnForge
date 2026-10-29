@@ -137,7 +137,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 
 ## I. Altyapı, sırlar ve işletim — P0 temel / P1 ölçek
 
-- [ ] VF-081: Geliştirme, staging ve production ortamlarını hesap/anahtar/veri bakımından ayır.
+- [x] VF-081: Geliştirme, staging ve production ortamlarını hesap/anahtar/veri bakımından ayır.
+  `Config.environment` (`development`, `staging`, `production`) ayrımı ve durum kontrolleri, production ortamında katı güvenlik invariantları (insecure local auth yasağı, HTTPS zorunluluğu, loopback adresi yasağı, ayrık PostgreSQL rolleri ve yüksek entropili webhook/admin secret'ları) ve `validate_cross_environment_isolation` ile ortamlar arası veri/anahtar/veritabanı çakışmalarını önleyen kontroller tamamlandı.
 - [ ] VF-082: TLS, ağ sınırları, güvenli ingress, limitler ve veritabanının özel ağ erişimini kur.
 - [ ] VF-083: GitHub anahtarı ve sırları kasaya taşı; gereksiz API/worker/container erişimini kaldır, rotasyonu test et.
 - [ ] VF-084: Veri ve yedek şifrelemesi, anahtar erişimi ve müşteri veri silme görevlerini uygula.
