@@ -112,7 +112,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-067: İnsan onayını kullanıcı, repo, SHA ve diff'e bağla; içerik değişince onayı geçersizleştir.
 - [x] VF-068: Draft PR'a advisory, pre/post sonuçlar, testler ve bilinmeyen riskleri ekle.
 - [x] VF-069: Branch/PR oluşturma retry'sında mevcut işi uzlaştır; duplicate PR ve insan değişikliğinin üzerine yazmayı engelle.
-- [ ] VF-070: Merge sonrası yeniden tarama, başarısızlıkta geri alma PR'ı ve bulgu kapanış kanıtı ekle.
+- [x] VF-070: Merge sonrası yeniden tarama, başarısızlıkta geri alma PR'ı ve bulgu kapanış kanıtı ekle.
 
 ## H. Kullanıcı paneli, bildirimler ve API — P1
 

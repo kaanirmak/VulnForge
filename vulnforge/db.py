@@ -385,6 +385,27 @@ class Store:
                     finding=c.execute('SELECT id FROM findings WHERE repo=? AND key=?',(repo,row['key'])).fetchone()
                     self.audit_event(repo,finding['id'],'scanner','finding_resolved',{'reason':'absent_from_complete_audit'})
 
+    def resolve_patch_findings_with_proof(self, repo: str, merge_sha: str, pr_url: str, resolved_advisories: list[str]):
+        """Close findings resolved by a verified merged patch PR and record closure proof."""
+        adv_set = set(resolved_advisories)
+        now = time.time()
+        with self.transaction(), self.conn() as c:
+            rows = c.execute("SELECT id, key, details FROM findings WHERE repo=? AND status='open'", (repo,)).fetchall()
+            for r in rows:
+                det = json.loads(r['details']) if isinstance(r['details'], str) else (r['details'] or {})
+                adv_id = det.get('advisory_id') or det.get('rule') or r['key']
+                if adv_id in adv_set or any(a in adv_set for a in det.get('aliases', [])):
+                    det['closure_proof'] = {
+                        'closure_reason': 'patch_merged_and_verified',
+                        'merge_sha': merge_sha,
+                        'pr_url': pr_url,
+                        'resolved_at': now,
+                        'verification_passed': True
+                    }
+                    c.execute("UPDATE findings SET status='resolved', details=? WHERE id=?",
+                              (json.dumps(det, sort_keys=True), r['id']))
+                    self.audit_event(repo, r['id'], 'system', 'finding_resolved_by_patch', det['closure_proof'])
+
     @staticmethod
     def normalize_package(name: str, eco: str) -> str:
         import re
