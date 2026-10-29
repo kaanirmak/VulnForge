@@ -25,9 +25,43 @@ MAX_ENTRIES=20_000
 MAX_DEPTH=32
 MAX_SECONDS=120
 REPORT_BYTES=1_000_000
+PROFILES=('default_branch','push','pull_request','scheduled')
 
 
 class ScanLimit(ValueError): pass
+
+
+def compare_pr_reports(base_report: RunnerReport | None, head_report: RunnerReport) -> dict:
+    if base_report is None or base_report.coverage.state!='complete':
+        return {
+            'diff_status':'unknown',
+            'new_findings':list(head_report.findings),
+            'pre_existing_findings':[],
+            'new_dependencies':list(head_report.dependencies),
+            'pre_existing_dependencies':[],
+        }
+    base_fps={f.fingerprint for f in base_report.findings}
+    base_rule_paths={(f.path_id,f.rule_id) for f in base_report.findings}
+    new_f=[];pre_f=[]
+    for f in head_report.findings:
+        if f.fingerprint in base_fps or (f.path_id,f.rule_id) in base_rule_paths:
+            pre_f.append(f)
+        else:
+            new_f.append(f)
+    base_deps={(d.ecosystem,d.name.lower(),d.version,d.path_id) for d in base_report.dependencies}
+    new_d=[];pre_d=[]
+    for d in head_report.dependencies:
+        if (d.ecosystem,d.name.lower(),d.version,d.path_id) in base_deps:
+            pre_d.append(d)
+        else:
+            new_d.append(d)
+    return {
+        'diff_status':'compared',
+        'new_findings':new_f,
+        'pre_existing_findings':pre_f,
+        'new_dependencies':new_d,
+        'pre_existing_dependencies':pre_d,
+    }
 
 
 def scan(root,repo,sha,kind='code'):
@@ -165,21 +199,35 @@ def main(argv=None):
     parser.add_argument('--repo',required=True)
     parser.add_argument('--sha',required=True)
     parser.add_argument('--kind',choices=('code','dependencies'),default='code')
+    parser.add_argument('--profile',choices=PROFILES,default='default_branch')
+    parser.add_argument('--base-root',default=None)
     parser.add_argument('--output',required=True)
     parser.add_argument('--require-complete',action='store_true')
     parser.add_argument('--fail-on',choices=('none','critical','high','medium','low'),default='none')
     args=parser.parse_args(argv)
+    require_complete=args.require_complete or args.profile=='scheduled'
     try:
+        if args.base_root is not None and args.profile!='pull_request':
+            raise ValueError('Base root applies only to pull_request profile')
         report=scan(args.root,args.repo,args.sha,args.kind)
+        base_report=scan(args.base_root,args.repo,args.sha,args.kind) if args.base_root else None
         write_report(report,args.output)
     except (OSError,ValueError,TypeError,RecursionError):
         print('Scan failed; private paths and contents are omitted.',file=sys.stderr)
         return 2
-    print(json.dumps({'state':report.coverage.state,'files_scanned':report.coverage.files_scanned,
-                      'files_skipped':report.coverage.files_skipped,'findings':len(report.findings)}))
-    if args.require_complete and report.coverage.state!='complete': return 3
+    summary={'profile':args.profile,'state':report.coverage.state,'files_scanned':report.coverage.files_scanned,
+             'files_skipped':report.coverage.files_skipped,'findings':len(report.findings)}
+    gated_findings=report.findings
+    if args.profile=='pull_request':
+        diff=compare_pr_reports(base_report,report)
+        summary['diff_status']=diff['diff_status']
+        summary['new_findings']=len(diff['new_findings'])
+        summary['pre_existing_findings']=len(diff['pre_existing_findings'])
+        gated_findings=diff['new_findings']
+    print(json.dumps(summary))
+    if require_complete and report.coverage.state!='complete': return 3
     rank={'critical':4,'high':3,'medium':2,'low':1,'info':0}
-    if args.fail_on!='none' and any(rank[f.severity]>=rank[args.fail_on] for f in report.findings): return 1
+    if args.fail_on!='none' and any(rank[f.severity]>=rank[args.fail_on] for f in gated_findings): return 1
     return 0
 
 

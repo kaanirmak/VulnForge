@@ -91,3 +91,36 @@ def test_atomic_private_output_and_exit_codes(tmp_path,capsys):
 def test_symlink_root_is_rejected(tmp_path):
     root=tmp_path/'source';root.mkdir();link=tmp_path/'link';link.symlink_to(root,target_is_directory=True)
     assert main(['--root',str(link),'--repo','org/project','--sha',SHA,'--output',str(tmp_path/'out')])==2
+
+
+def test_cli_profiles_push_pr_default_branch_and_scheduled(tmp_path,capsys):
+    base=tmp_path/'base';base.mkdir()
+    head=tmp_path/'head';head.mkdir()
+    (base/'existing.py').write_text('eval(old_value)\n')
+    (head/'existing.py').write_text('# comment line\neval(old_value)\n')
+    out=tmp_path/'report.json'
+    # PR profile with base-root ignores pre-existing finding when gating on --fail-on high
+    code=main(['--root',str(head),'--base-root',str(base),'--profile','pull_request',
+               '--repo','org/project','--sha',SHA,'--output',str(out),'--fail-on','high'])
+    assert code==0
+    summary=json.loads(capsys.readouterr().out)
+    assert summary['profile']=='pull_request' and summary['diff_status']=='compared'
+    assert summary['new_findings']==0 and summary['pre_existing_findings']==1
+
+    # Introducing a new finding in head fails the PR gate
+    (head/'added.py').write_text('eval(new_value)\n')
+    code2=main(['--root',str(head),'--base-root',str(base),'--profile','pull_request',
+                '--repo','org/project','--sha',SHA,'--output',str(out),'--fail-on','high'])
+    assert code2==1
+    summary2=json.loads(capsys.readouterr().out)
+    assert summary2['new_findings']==1 and summary2['pre_existing_findings']==1
+
+    # Scheduled profile requires complete coverage automatically
+    sched=main(['--root',str(head),'--profile','scheduled','--kind','dependencies',
+                '--repo','org/project','--sha',SHA,'--output',str(out)])
+    assert sched==3
+    capsys.readouterr()
+
+    # --base-root with non-PR profile is rejected
+    assert main(['--root',str(head),'--base-root',str(base),'--profile','push',
+                 '--repo','org/project','--sha',SHA,'--output',str(out)])==2

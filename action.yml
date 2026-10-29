@@ -19,6 +19,12 @@ inputs:
   require-complete:
     description: Require complete manifest and file coverage; exit 3 on incomplete scan.
     default: 'false'
+  profile:
+    description: Scan profile (default_branch, push, pull_request or scheduled).
+    default: default_branch
+  base-root:
+    description: Optional base checkout root for pull_request profile comparison.
+    default: ''
 outputs:
   code-report:
     description: Local metadata report path; no source artifact is uploaded.
@@ -38,6 +44,8 @@ runs:
         VF_SHA: ${{ inputs.commit-sha }}
         VF_FAIL_ON: ${{ inputs.fail-on }}
         VF_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
+        VF_PROFILE: ${{ inputs.profile }}
+        VF_BASE_ROOT: ${{ inputs.base-root }}
         VF_ACTION: ${{ github.action_path }}
       run: |
         set -euo pipefail
