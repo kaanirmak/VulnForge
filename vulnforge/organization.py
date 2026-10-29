@@ -278,6 +278,211 @@ class OrganizationData:
                 'connection_health': connection_health
             }
 
+    def finding(self, finding_id: int) -> dict:
+        with self.access('finding.read') as c:
+            self._expire_suppressions(c)
+            sql, args = self.query('findings')
+            row = c.execute(sql + ' AND x.id=?', args + [finding_id]).fetchone()
+            if row is None:
+                raise ResourceNotFound('Finding not found')
+
+            raw_item = self.decode([row], ('details',))[0]
+            repo = raw_item['repo']
+
+            from .freshness import finding_view
+            finding_item = finding_view(c, raw_item)
+            details = finding_item.get('details', {})
+
+            # 1. Base commit and SHA drift check
+            repo_row = c.execute('SELECT default_branch, last_sha FROM repositories WHERE full_name=?', (repo,)).fetchone()
+            head_sha = repo_row['last_sha'] if repo_row else None
+            baseline_sha = finding_item.get('commit_sha')
+            head_drifted = bool(head_sha and baseline_sha and head_sha != baseline_sha)
+
+            sha_info = {
+                'commit_sha': baseline_sha,
+                'head_sha': head_sha,
+                'head_drifted': head_drifted,
+                'default_branch': repo_row['default_branch'] if repo_row else 'main'
+            }
+
+            # 2. Advisory metadata (if linked to an advisory/CVE)
+            advisory_info = None
+            adv_id = details.get('advisory_id') or details.get('osv_id') or details.get('cve_id')
+            if adv_id:
+                scope = 'org:' + self.organization_id
+                adv_row = c.execute(
+                    "SELECT id, summary, data, source, source_sha256, withdrawn, catalog_scope, aliases, first_seen_at, updated_at "
+                    "FROM advisories WHERE id=? AND catalog_scope IN ('public', ?)",
+                    (adv_id, scope)
+                ).fetchone()
+                if adv_row:
+                    adv_decoded = self.decode([adv_row], ('aliases',))[0]
+                    adv_data = json.loads(adv_decoded.get('data') or '{}')
+                    adv_details = adv_data.get('details') or adv_decoded.get('summary')
+                    metrics_info = None
+                    try:
+                        cve_ids = [a for a in adv_decoded.get('aliases', []) if a.startswith('CVE-')]
+                        if adv_id.startswith('CVE-'):
+                            cve_ids.append(adv_id)
+                        for cve in cve_ids:
+                            m_row = c.execute("SELECT cvss_score, cvss_severity, cvss_vector, epss_score, epss_percentile, kev_date_added, kev_ransomware, updated_at FROM vulnerability_metrics WHERE cve_id=?", (cve,)).fetchone()
+                            if m_row:
+                                m_dict = dict(m_row)
+                                metrics_info = {
+                                    'cvss_score': m_dict['cvss_score'],
+                                    'cvss_severity': m_dict['cvss_severity'],
+                                    'cvss_vector': m_dict['cvss_vector'],
+                                    'epss_score': m_dict['epss_score'],
+                                    'epss_percentile': m_dict['epss_percentile'],
+                                    'cisa_kev': bool(m_dict['kev_date_added']),
+                                    'kev_date_added': m_dict['kev_date_added'],
+                                    'calculated_at': m_dict['updated_at']
+                                }
+                                break
+                    except Exception:
+                        pass
+
+                    advisory_info = {
+                        'id': adv_decoded['id'],
+                        'summary': adv_decoded['summary'],
+                        'details': adv_details,
+                        'aliases': adv_decoded.get('aliases', []),
+                        'source': adv_decoded['source'],
+                        'source_sha256': adv_decoded['source_sha256'],
+                        'withdrawn': bool(adv_decoded['withdrawn']),
+                        'metrics': metrics_info
+                    }
+
+            # 3. Package graph / dependency info
+            package_graph = None
+            package_name = details.get('package_name') or details.get('package')
+            ecosystem = details.get('ecosystem')
+            file_path = finding_item.get('file_path')
+
+            dep_row = None
+            if package_name:
+                dep_sql, dep_args = self.query('dependency_inventory')
+                dep_row = c.execute(
+                    dep_sql + ' AND x.repo=? AND x.normalized_name=?',
+                    dep_args + [repo, package_name.lower()]
+                ).fetchone()
+
+            if dep_row:
+                dep_data = dict(dep_row)
+                direct = details.get('direct', bool(dep_data.get('direct', True)))
+                package_graph = {
+                    'package': dep_data.get('package_name', package_name),
+                    'version': dep_data['version'],
+                    'ecosystem': dep_data['ecosystem'],
+                    'file_path': dep_data['file_path'],
+                    'direct': direct,
+                    'scope': details.get('scope', dep_data.get('scope', 'runtime')),
+                    'dependency_edges': details.get('dependency_edges') or (json.loads(dep_data.get('dependency_edges') or '[]') if dep_data.get('dependency_edges') else []),
+                    'digest': details.get('digest') or dep_data.get('digest'),
+                    'commit': details.get('commit') or dep_data.get('commit')
+                }
+            elif package_name:
+                package_graph = {
+                    'package': package_name,
+                    'version': details.get('version', 'unknown'),
+                    'ecosystem': ecosystem or 'unknown',
+                    'file_path': file_path,
+                    'direct': details.get('direct', True),
+                    'scope': details.get('scope', 'runtime'),
+                    'dependency_edges': details.get('dependency_edges', []),
+                    'digest': None,
+                    'commit': None
+                }
+
+            # 4. History (audit events, suppressions)
+            history_rows = c.execute(
+                "SELECT id, actor, action, details, created_at FROM audit_events "
+                "WHERE repo=? AND finding_id=? ORDER BY created_at ASC, id ASC",
+                (repo, finding_id)
+            ).fetchall()
+            history = []
+            for h in history_rows:
+                h_dict = dict(h)
+                if isinstance(h_dict['details'], str):
+                    try:
+                        h_dict['details'] = json.loads(h_dict['details'])
+                    except Exception:
+                        pass
+                history.append(h_dict)
+
+            suppression_row = c.execute(
+                "SELECT reason, expires_at FROM suppressions WHERE finding_id=?",
+                (finding_id,)
+            ).fetchone()
+            active_suppression = dict(suppression_row) if suppression_row else None
+
+            # 5. Update alternatives & recommendations
+            recommendations = []
+            rec = details.get('update_recommendation')
+            if rec:
+                recommendations.append(rec)
+
+            if adv_id:
+                imp_row = c.execute(
+                    "SELECT recommendations FROM advisory_impacts WHERE repo=? AND advisory_id=?",
+                    (repo, adv_id)
+                ).fetchone()
+                if imp_row and imp_row['recommendations']:
+                    imp_recs = json.loads(imp_row['recommendations'])
+                    for r in imp_recs:
+                        if r not in recommendations:
+                            recommendations.append(r)
+
+            remediation_plan = None
+            try:
+                rem_row = c.execute(
+                    "SELECT id, key, url, created_at FROM remediations WHERE repo=? AND (key LIKE ? OR key LIKE ?)",
+                    (repo, f'%"{finding_id}"%', f'%{package_name or ""}%')
+                ).fetchone()
+                if rem_row:
+                    remediation_plan = {
+                        'id': rem_row['id'],
+                        'plan_key': rem_row['key'],
+                        'pr_url': rem_row['url'],
+                        'created_at': rem_row['created_at']
+                    }
+            except Exception:
+                pass
+
+            evidence = {
+                'file_path': finding_item.get('file_path'),
+                'line': details.get('line'),
+                'snippet': details.get('snippet'),
+                'sink': details.get('sink'),
+                'source': details.get('source'),
+                'rule_id': details.get('rule_id') or finding_item.get('key'),
+                'fingerprint': details.get('fingerprint'),
+                'evidence_status': details.get('evidence_status') or finding_item.get('evidence_status'),
+                'details': details
+            }
+
+            return {
+                'id': finding_item['id'],
+                'repo': repo,
+                'key': finding_item['key'],
+                'category': finding_item['category'],
+                'severity': finding_item['severity'],
+                'title': finding_item['title'],
+                'file_path': finding_item['file_path'],
+                'commit_sha': finding_item['commit_sha'],
+                'status': finding_item['status'],
+                'detected_at': finding_item['detected_at'],
+                'sha_info': sha_info,
+                'evidence': evidence,
+                'advisory': advisory_info,
+                'package_graph': package_graph,
+                'history': history,
+                'active_suppression': active_suppression,
+                'recommendations': recommendations,
+                'remediation_plan': remediation_plan
+            }
+
     def rows(self,table,repo=None,limit=50,cursor=0,status=None,severity=None):
         permission={'findings':'finding.read','scans':'scan.read'}.get(table,'project.read')
         if table not in TABLES or table=='advisory_impacts': raise ValueError('Unsupported customer table')

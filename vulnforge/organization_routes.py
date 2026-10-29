@@ -271,6 +271,10 @@ def install_organization_routes(app,cfg,store):
                        limit:int=Query(50,ge=1,le=100),cursor:int=Query(0,ge=0),data=Depends(scoped)):
         return data.rows('findings',repo,limit,cursor,status,severity)
 
+    @router.get('/findings/{finding_id}')
+    async def finding(finding_id:int,data=Depends(scoped)):
+        return data.finding(finding_id)
+
     @router.patch('/findings/{finding_id}/triage',dependencies=[Depends(csrf)])
     async def triage(finding_id:int,change:CustomerTriage,data=Depends(scoped)):
         try: return data.triage(finding_id,change.status,change.reason,change.expires_at)
