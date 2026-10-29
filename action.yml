@@ -16,6 +16,9 @@ inputs:
   fail-on:
     description: none, critical, high, medium or low.
     default: none
+  require-complete:
+    description: Require complete manifest and file coverage; exit 3 on incomplete scan.
+    default: 'false'
 outputs:
   code-report:
     description: Local metadata report path; no source artifact is uploaded.
@@ -34,6 +37,7 @@ runs:
         VF_REPOSITORY: ${{ inputs.repository }}
         VF_SHA: ${{ inputs.commit-sha }}
         VF_FAIL_ON: ${{ inputs.fail-on }}
+        VF_REQUIRE_COMPLETE: ${{ inputs.require-complete }}
         VF_ACTION: ${{ github.action_path }}
       run: |
         set -euo pipefail

@@ -19,8 +19,10 @@ def main():
             raise ValueError('Scanner runtime must be outside the checkout')
         repo=os.environ['VF_REPOSITORY'];sha=os.environ['VF_SHA']
         threshold=os.environ.get('VF_FAIL_ON','none')
+        require_complete=os.environ.get('VF_REQUIRE_COMPLETE','false').lower()
         rank={'critical':4,'high':3,'medium':2,'low':1,'info':0}
         if threshold not in ('none','critical','high','medium','low'): raise ValueError('Invalid threshold')
+        if require_complete not in ('true','false'): raise ValueError('Invalid completeness flag')
         directory=Path(tempfile.mkdtemp(prefix='vulnforge-',dir=os.environ['RUNNER_TEMP']))
         reports={kind:scan(root,repo,sha,kind) for kind in ('code','dependencies')}
         for kind,report in reports.items(): write_report(report,directory/(kind+'.json'))
@@ -32,6 +34,9 @@ def main():
             output.write(f'dependency-report={directory / "dependencies.json"}\n')
         print(json.dumps({kind:{'state':report.coverage.state,'findings':len(report.findings)}
                           for kind,report in reports.items()}))
+        if require_complete=='true' and any(r.coverage.state!='complete' for r in reports.values()):
+            shutil.rmtree(directory);directory=None
+            return 3
         if threshold!='none' and any(rank[f.severity]>=rank[threshold] for f in reports['code'].findings):
             shutil.rmtree(directory);directory=None
             return 1

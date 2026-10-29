@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from vulnforge.github_app import registration
+from vulnforge.github_app import registration,render_workflow_template,validate_workflow_template
 from vulnforge.runner_cleanup import cleanup
 
 
@@ -71,3 +71,27 @@ def test_cleanup_refuses_checkout_symlinks_or_unexpected_files(tmp_path):
     (directory/'other-file').unlink();(directory/'code.json').symlink_to(root/'source.py')
     with pytest.raises(ValueError): cleanup(directory/'code.json',temp)
     assert (root/'source.py').read_text()=='must remain'
+
+
+def test_action_require_complete_and_workflow_template_generation(tmp_path):
+    root,temp,output,env=environment(tmp_path)
+    (root/'code.py').write_text('x = 1\n')
+    script=Path(__file__).resolve().parents[1]/'scripts/action_scan.py'
+    incomplete=subprocess.run([sys.executable,'-I',str(script)],cwd=root,
+                              env={**env,'VF_REQUIRE_COMPLETE':'true'},capture_output=True,text=True)
+    assert incomplete.returncode==3
+    assert not list(temp.iterdir())
+
+    pinned='org/vulnforge@'+'1'*40
+    for tmpl in ('default_branch','pull_request','scheduled'):
+        rendered=render_workflow_template(tmpl,action_ref=pinned,default_branch='main',fail_on='high')
+        info=validate_workflow_template(rendered)
+        assert info['valid'] is True
+
+    for bad_ref in ('OWNER/VulnForge@COMMIT_SHA','org/vulnforge@main','org/vulnforge@v1','../bad@'+'1'*40):
+        with pytest.raises(ValueError):
+            render_workflow_template('default_branch',action_ref=bad_ref)
+    with pytest.raises(ValueError):
+        render_workflow_template('pull_request',action_ref=pinned,runner_labels=['self-hosted','linux'])
+    with pytest.raises(ValueError):
+        render_workflow_template('default_branch',action_ref=pinned,scanner_python='/github/workspace/bin/python')
