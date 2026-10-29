@@ -535,7 +535,7 @@ class OrganizationData:
                     {'organization_id':self.organization_id,'scan_id':scan_id})
             return scan
 
-    def impacts(self,repo=None,advisory_id=None,state=None,cursor=0,limit=50):
+    def impacts(self,repo=None,advisory_id=None,state=None,cursor=0,limit=50,ecosystem=None,package=None,assigned_to=None):
         with self.access('impact.read') as c:
             self._repo(c,repo)
             scope='org:'+self.organization_id
@@ -547,13 +547,134 @@ class OrganizationData:
             if advisory_id is not None:
                 sql+=" AND EXISTS (SELECT 1 FROM advisory_aliases a WHERE a.advisory_id=x.advisory_id AND a.alias=? AND a.catalog_scope IN ('public',?))"
                 args.extend([advisory_id,scope])
+            if package is not None:
+                sql+=" AND (x.recommendations LIKE ? OR x.evidence LIKE ?)"
+                args.extend([f'%"{package}"%', f'%"{package}"%'])
+            if ecosystem is not None:
+                sql+=" AND (x.recommendations LIKE ? OR x.evidence LIKE ?)"
+                args.extend([f'%"{ecosystem}"%', f'%"{ecosystem}"%'])
+            if assigned_to is not None:
+                if assigned_to == 'unassigned':
+                    sql+=" AND (x.evidence NOT LIKE '%\"assigned_to\"%' OR x.evidence LIKE '%\"assigned_to\": null%')"
+                else:
+                    sql+=" AND x.evidence LIKE ?"
+                    args.append(f'%"assigned_to": "{assigned_to}"%')
             rows=c.execute(sql+' ORDER BY x.id LIMIT ?',args+[limit+1]).fetchall()
             items=self.decode(rows[:limit],('evidence','recommendations'))
             from .freshness import impact_view
             cache={}
             items=[impact_view(c,item,cache) for item in items]
+            for item in items:
+                item['assigned_to'] = item.get('evidence', {}).get('assigned_to')
             return {'items':items,'next_cursor':items[-1]['id'] if len(rows)>limit else None,
                     'filter_scope':'observed_state'}
+
+    def assign_impact(self, impact_id: int, assigned_to: str | None) -> dict:
+        with self.access('finding.triage') as c:
+            sql, args = self.query('advisory_impacts')
+            row = c.execute(sql + ' AND x.id=?', args + [impact_id]).fetchone()
+            if row is None:
+                raise ResourceNotFound('Impact not found')
+
+            if assigned_to is not None:
+                m_row = c.execute(
+                    'SELECT user_id, role FROM memberships WHERE organization_id=? AND user_id=?',
+                    (self.organization_id, assigned_to)
+                ).fetchone()
+                if m_row is None:
+                    raise ResourceNotFound('Assignee is not a member of this organization')
+
+            item = self.decode([row], ('evidence', 'recommendations'))[0]
+            repo = item['repo']
+            advisory_id = item['advisory_id']
+            evidence = item.get('evidence', {})
+            previous_assignee = evidence.get('assigned_to')
+            evidence['assigned_to'] = assigned_to
+
+            revisions = list(evidence.get('_revisions', []))
+            revisions.append({
+                'revision': len(revisions) + 1,
+                'state': item['state'],
+                'scan_id': item['scan_id'],
+                'assigned_to': assigned_to,
+                'previous_assigned_to': previous_assignee,
+                'change': 'assigned' if assigned_to else 'unassigned',
+                'actor_id': self.user_id,
+                'updated_at': time.time()
+            })
+            evidence['_revisions'] = revisions[-50:]
+
+            c.execute(
+                'UPDATE advisory_impacts SET evidence=?, updated_at=? WHERE id=? AND repo=?',
+                (json.dumps(evidence, sort_keys=True), time.time(), impact_id, repo)
+            )
+
+            self.store.audit_event(
+                repo,
+                impact_id,
+                self.user_id,
+                'impact_assigned',
+                {
+                    'organization_id': self.organization_id,
+                    'advisory_id': advisory_id,
+                    'assigned_to': assigned_to,
+                    'previous_assigned_to': previous_assignee
+                }
+            )
+
+            return {
+                'id': impact_id,
+                'repo': repo,
+                'advisory_id': advisory_id,
+                'assigned_to': assigned_to,
+                'previous_assigned_to': previous_assignee,
+                'updated_at': time.time()
+            }
+
+    def impact_history(self, impact_id: int) -> dict:
+        with self.access('impact.read') as c:
+            sql, args = self.query('advisory_impacts')
+            row = c.execute(sql + ' AND x.id=?', args + [impact_id]).fetchone()
+            if row is None:
+                raise ResourceNotFound('Impact not found')
+
+            item = self.decode([row], ('evidence', 'recommendations'))[0]
+            repo = item['repo']
+            advisory_id = item['advisory_id']
+            evidence = item.get('evidence', {})
+            revisions = list(evidence.get('_revisions', []))
+
+            timeline = []
+            for i, rev in enumerate(revisions):
+                prev_rev = revisions[i - 1] if i > 0 else None
+                diff = {}
+                if prev_rev:
+                    if prev_rev.get('state') != rev.get('state'):
+                        diff['state_changed'] = {'from': prev_rev.get('state'), 'to': rev.get('state')}
+                    if prev_rev.get('assigned_to') != rev.get('assigned_to'):
+                        diff['assignment_changed'] = {'from': prev_rev.get('assigned_to'), 'to': rev.get('assigned_to')}
+                else:
+                    diff['initial_state'] = rev.get('state')
+
+                timeline.append({
+                    'revision': rev.get('revision', i + 1),
+                    'state': rev.get('state'),
+                    'assigned_to': rev.get('assigned_to'),
+                    'updated_at': rev.get('updated_at'),
+                    'diff': diff,
+                    'scan_id': rev.get('scan_id'),
+                    'recommendation_count': len(rev.get('recommendations') or [])
+                })
+
+            return {
+                'id': impact_id,
+                'repo': repo,
+                'advisory_id': advisory_id,
+                'current_state': item['state'],
+                'current_assigned_to': evidence.get('assigned_to'),
+                'total_revisions': len(revisions),
+                'timeline': timeline
+            }
 
     def advisories(self,limit=50):
         with self.access('impact.read') as c:

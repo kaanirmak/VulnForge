@@ -24,6 +24,11 @@ class CustomerTriage(BaseModel):
     expires_at:float|None=None
 
 
+class ImpactAssign(BaseModel):
+    model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
+    assigned_to:str|None=Field(default=None,max_length=64)
+
+
 class InvitationRequest(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
     github_id:int=Field(gt=0,lt=2**63)
@@ -301,8 +306,19 @@ def install_organization_routes(app,cfg,store):
     @router.get('/impacts')
     async def impacts(repo:str|None=None,advisory_id:str|None=None,
                       state:Literal['affected','not_affected','under_investigation','withdrawn']|None=None,
+                      ecosystem:str|None=None,package:str|None=None,assigned_to:str|None=None,
                       limit:int=Query(50,ge=1,le=100),cursor:int=Query(0,ge=0),data=Depends(scoped)):
-        return data.impacts(repo,advisory_id,state,cursor,limit)
+        return data.impacts(repo,advisory_id,state,cursor,limit,ecosystem=ecosystem,package=package,assigned_to=assigned_to)
+
+    @router.patch('/impacts/{impact_id}/assign',dependencies=[Depends(csrf)])
+    async def assign_impact(impact_id:int,body:ImpactAssign,data=Depends(scoped)):
+        try: return data.assign_impact(impact_id,body.assigned_to)
+        except LookupError: raise HTTPException(404,'Impact or assignee not found') from None
+        except ValueError: raise HTTPException(422,'Invalid assignment request') from None
+
+    @router.get('/impacts/{impact_id}/history')
+    async def impact_history(impact_id:int,data=Depends(scoped)):
+        return data.impact_history(impact_id)
 
     @router.get('/advisories')
     async def advisories(limit:int=Query(50,ge=1,le=100),data=Depends(scoped)):
