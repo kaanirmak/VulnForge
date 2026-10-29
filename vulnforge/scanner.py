@@ -43,6 +43,21 @@ SEMGREP_RULEPACK_CONTENT = json.dumps({
 }, sort_keys=True, separators=(',', ':'))
 SEMGREP_RULEPACK_SHA256 = hashlib.sha256(SEMGREP_RULEPACK_CONTENT.encode()).hexdigest()
 
+PINNED_GITLEAKS_VERSION = '8.21.2'
+GITLEAKS_CONFIG_ID = 'vulnforge-gitleaks-v1'
+GITLEAKS_CONFIG_CONTENT = (
+    'title = "VulnForge Gitleaks Config v1"\n'
+    '[[rules]]\nid = "github-pat"\ndescription = "GitHub Personal Access Token"\n'
+    'regex = \'\'\'\\b(?:ghp_|gho_|ghu_|ghs_|ghr_)[A-Za-z0-9]{30,}\\b\'\'\'\n'
+    '[[rules]]\nid = "github-fine-grained-pat"\ndescription = "GitHub Fine-Grained Personal Access Token"\n'
+    'regex = \'\'\'github_pat_[A-Za-z0-9_]{22,}\'\'\'\n'
+    '[[rules]]\nid = "aws-access-token"\ndescription = "AWS Access Key ID"\n'
+    'regex = \'\'\'\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b\'\'\'\n'
+    '[[rules]]\nid = "private-key"\ndescription = "Asymmetric Private Key"\n'
+    'regex = \'\'\'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----\'\'\'\n'
+)
+GITLEAKS_CONFIG_SHA256 = hashlib.sha256(GITLEAKS_CONFIG_CONTENT.encode()).hexdigest()
+
 SEMGREP_CHECK_ID_MAP = {
     'vulnforge.python.dynamic-execution': 'dynamic-execution',
     'python.lang.security.audit.eval-detected': 'dynamic-execution',
@@ -93,6 +108,18 @@ def redact_evidence(rule: str | None, snippet: str) -> str:
     if rule in ('hardcoded-secret', 'gitleaks-secret') or any(rx.search(snippet) for _, rx in SECRETS):
         return '[REDACTED: possible secret]'
     return snippet[:140]
+
+
+def scrub_secret_values(text: str, extra_secrets: list[str] | tuple[str, ...] = ()) -> str:
+    if not isinstance(text, str) or not text:
+        return ''
+    out = text
+    for item in extra_secrets:
+        if isinstance(item, str) and item:
+            out = out.replace(item, '[REDACTED]')
+    for _, rx in SECRETS:
+        out = rx.sub('[REDACTED]', out)
+    return out
 
 
 def runner_fingerprint(path_pseudonym: str, line: int, rule_id: str) -> str:
@@ -458,4 +485,110 @@ def run_semgrep_adapter(target_root: str | Path, *, semgrep_bin: str | Path,
         scan_out,
         expected_version=contract['version'],
         rulepack_sha256=contract['rulepack_sha256'],
+    )
+
+
+def verify_gitleaks_contract(version_output: str, *, config_path: str | Path | None = None,
+                             expected_version: str = PINNED_GITLEAKS_VERSION,
+                             expected_config_sha256: str = GITLEAKS_CONFIG_SHA256) -> dict:
+    if not isinstance(version_output, str):
+        raise ValueError('Gitleaks version output is required')
+    m = re.search(r'\bv?(\d+\.\d+\.\d+)\b', version_output.strip())
+    if not m or m.group(1) != expected_version:
+        raise ValueError(f'Gitleaks version mismatch: expected {expected_version}')
+    actual_sha = expected_config_sha256
+    if config_path is not None:
+        resolved = Path(config_path).resolve(strict=True)
+        actual_sha = hashlib.sha256(resolved.read_bytes()).hexdigest()
+        if actual_sha != expected_config_sha256:
+            raise ValueError('Gitleaks config SHA-256 checksum mismatch')
+    return {
+        'tool': 'gitleaks',
+        'version': expected_version,
+        'config_id': GITLEAKS_CONFIG_ID,
+        'config_sha256': actual_sha,
+    }
+
+
+def parse_gitleaks_json(payload: list | str | bytes, *,
+                        expected_version: str = PINNED_GITLEAKS_VERSION,
+                        config_sha256: str = GITLEAKS_CONFIG_SHA256) -> list[dict]:
+    from .privacy import path_id
+    if isinstance(payload, (str, bytes)):
+        text = payload.decode('utf-8') if isinstance(payload, bytes) else payload
+        data = json.loads(text) if text.strip() else []
+    elif isinstance(payload, list):
+        data = payload
+    else:
+        raise ValueError('Invalid Gitleaks JSON payload')
+    if not isinstance(data, list):
+        raise ValueError('Gitleaks JSON payload must be a list')
+    findings = []
+    for item in data:
+        if not isinstance(item, dict):
+            raise ValueError('Invalid Gitleaks finding entry')
+        rel_path = item.get('File') or item.get('file')
+        path_id(rel_path)
+        line = item.get('StartLine') if 'StartLine' in item else item.get('line')
+        if type(line) is not int or line < 1:
+            raise ValueError('Gitleaks finding requires a positive integer StartLine')
+        raw_rule = str(item.get('RuleID') or item.get('rule_id') or 'secret').strip()
+        if not re.fullmatch(r'[A-Za-z0-9_.-]{1,128}', raw_rule):
+            raise ValueError('Invalid Gitleaks RuleID')
+        raw_secret = str(item.get('Secret') or '')
+        raw_match = str(item.get('Match') or '')
+        desc = str(item.get('Description') or f'Secret detected ({raw_rule})').strip()
+        safe_desc = scrub_secret_values(desc, extra_secrets=(raw_secret, raw_match))
+        title = f'Possible {safe_desc} in source' if not safe_desc.lower().startswith('possible ') else safe_desc
+        findings.append(normalize_finding(
+            category='code',
+            severity='high',
+            title=title,
+            file_path=rel_path,
+            line=line,
+            rule='hardcoded-secret',
+            snippet='[REDACTED: possible secret]',
+            scanner='gitleaks',
+            details={
+                'gitleaks_rule_id': raw_rule,
+                'tool_version': expected_version,
+                'config_id': GITLEAKS_CONFIG_ID,
+                'config_sha256': config_sha256,
+                'line_signature': _line_sig('hardcoded-secret', title, is_secret=True),
+            },
+        ))
+    return findings
+
+
+def run_gitleaks_adapter(target_root: str | Path, *, gitleaks_bin: str | Path,
+                         config_path: str | Path,
+                         expected_version: str = PINNED_GITLEAKS_VERSION,
+                         expected_config_sha256: str = GITLEAKS_CONFIG_SHA256,
+                         runner=None) -> list[dict]:
+    root = Path(target_root).resolve(strict=True)
+    binary = Path(gitleaks_bin)
+    if not binary.is_absolute():
+        raise ValueError('Gitleaks binary path must be absolute')
+    if str(binary).startswith(str(root) + '/'):
+        raise ValueError('Gitleaks binary must reside outside target checkout')
+    exec_fn = runner or (lambda cmd: subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60).stdout)
+    try:
+        ver_out = exec_fn([str(binary), 'version'])
+        contract = verify_gitleaks_contract(
+            ver_out,
+            config_path=config_path,
+            expected_version=expected_version,
+            expected_config_sha256=expected_config_sha256,
+        )
+        scan_out = exec_fn([
+            str(binary), 'dir', str(root), '--no-banner', '--redact',
+            '--exit-code', '0', '--config', str(Path(config_path).resolve(strict=True)),
+            '--report-format', 'json', '--report-path', '-',
+        ])
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(scrub_secret_values(str(exc.stderr or exc.stdout or 'Gitleaks execution failed'))) from None
+    return parse_gitleaks_json(
+        scan_out,
+        expected_version=contract['version'],
+        config_sha256=contract['config_sha256'],
     )

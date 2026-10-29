@@ -1,5 +1,9 @@
 from vulnforge.scanner import (
     FINDING_SCHEMA_VERSION,
+    GITLEAKS_CONFIG_CONTENT,
+    GITLEAKS_CONFIG_ID,
+    GITLEAKS_CONFIG_SHA256,
+    PINNED_GITLEAKS_VERSION,
     PINNED_SEMGREP_VERSION,
     SEMGREP_RULEPACK_CONTENT,
     SEMGREP_RULEPACK_ID,
@@ -7,11 +11,15 @@ from vulnforge.scanner import (
     compute_fingerprint,
     normalize_finding,
     normalize_severity,
+    parse_gitleaks_json,
     parse_semgrep_json,
+    run_gitleaks_adapter,
     run_semgrep_adapter,
     runner_fingerprint,
     scan_code,
+    scrub_secret_values,
     to_runner_finding,
+    verify_gitleaks_contract,
     verify_semgrep_contract,
 )
 from vulnforge.dependencies import parse_manifest, Dependency
@@ -198,3 +206,80 @@ def test_semgrep_adapter_pins_rulepack_and_tool_version_and_strips_source(tmp_pa
         parse_semgrep_json({'version':'0.99.0','results':[]})
     with pytest.raises(ValueError):
         run_semgrep_adapter(checkout,semgrep_bin=checkout/'bin/semgrep',rulepack_path=rulepack,runner=fake_runner)
+
+
+def test_gitleaks_adapter_strips_secrets_from_findings_logs_and_exports(tmp_path):
+    import json, subprocess, pytest
+    from vulnforge.reports import sarif
+    checkout=tmp_path/'checkout';checkout.mkdir()
+    config_file=tmp_path/'gitleaks.toml'
+    config_file.write_text(GITLEAKS_CONFIG_CONTENT,encoding='utf-8')
+    contract=verify_gitleaks_contract(f'v{PINNED_GITLEAKS_VERSION}\n',config_path=config_file)
+    assert contract['version']==PINNED_GITLEAKS_VERSION
+    assert contract['config_id']==GITLEAKS_CONFIG_ID
+    assert contract['config_sha256']==GITLEAKS_CONFIG_SHA256
+
+    with pytest.raises(ValueError):
+        verify_gitleaks_contract('8.20.0',config_path=config_file)
+    bad_cfg=tmp_path/'bad.toml';bad_cfg.write_text('title = "bad"',encoding='utf-8')
+    with pytest.raises(ValueError):
+        verify_gitleaks_contract(PINNED_GITLEAKS_VERSION,config_path=bad_cfg)
+
+    raw_token='ghp_'+'Z'*36
+    raw_aws='AKIAIOSFODNN7EXAMPLE'
+    commands=[]
+    def fake_runner(cmd):
+        commands.append(cmd)
+        if 'version' in cmd:
+            return PINNED_GITLEAKS_VERSION
+        return json.dumps([
+            {
+                'RuleID':'github-pat',
+                'Description':f'GitHub Personal Access Token {raw_token}',
+                'StartLine':14,
+                'File':'src/config.py',
+                'Secret':raw_token,
+                'Match':f'GITHUB_TOKEN = "{raw_token}"',
+            },
+            {
+                'RuleID':'aws-access-token',
+                'Description':'AWS Access Key ID',
+                'StartLine':28,
+                'File':'src/aws.py',
+                'Secret':raw_aws,
+                'Match':f'aws_key = "{raw_aws}"',
+            },
+        ])
+    findings=run_gitleaks_adapter(checkout,gitleaks_bin='/opt/gitleaks/bin/gitleaks',
+                                  config_path=config_file,runner=fake_runner)
+    assert len(findings)==2
+    assert '--redact' in commands[1] and '--no-banner' in commands[1]
+    encoded_findings=json.dumps(findings)
+    assert raw_token not in encoded_findings and raw_aws not in encoded_findings
+    assert findings[0]['scanner']=='gitleaks'
+    assert findings[0]['details']['rule']=='hardcoded-secret'
+    assert findings[0]['details']['gitleaks_rule_id']=='github-pat'
+    assert findings[0]['details']['evidence']=='[REDACTED: possible secret]'
+    runner_f=to_runner_finding(findings[0])
+    assert runner_f['rule_id']=='hardcoded-secret' and runner_f['line']==14
+
+    # Verify SARIF export and error log scrubbing never leak secret values
+    scan_doc={
+        'id':'11111111-2222-3333-4444-555555555555',
+        'state':'complete',
+        'commit_sha':'a'*40,
+        'coverage':{'scope':'commit_files'},
+        'findings':findings,
+    }
+    sarif_json=json.dumps(sarif(scan_doc))
+    assert raw_token not in sarif_json and raw_aws not in sarif_json
+
+    def failing_runner(cmd):
+        if 'version' in cmd:
+            return PINNED_GITLEAKS_VERSION
+        raise subprocess.CalledProcessError(2,cmd,stderr=f'fatal error while scanning {raw_token}')
+    with pytest.raises(RuntimeError) as exc_info:
+        run_gitleaks_adapter(checkout,gitleaks_bin='/opt/gitleaks/bin/gitleaks',
+                             config_path=config_file,runner=failing_runner)
+    assert raw_token not in str(exc_info.value) and '[REDACTED]' in str(exc_info.value)
+    assert raw_token not in scrub_secret_values(f'leak: {raw_token}')

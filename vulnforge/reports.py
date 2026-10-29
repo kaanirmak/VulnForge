@@ -33,13 +33,15 @@ def sbom(scan):
 
 
 def sarif(scan):
+    from .scanner import scrub_secret_values
     rules, results = {}, []
     for f in scan['findings']:
         details = f['details']
         rule = details.get('rule', details.get('osv_id', f.get('category', 'coverage')))
-        rules[rule] = {'id': rule, 'shortDescription': {'text': f['title']}}
+        safe_title = scrub_secret_values(str(f['title']))
+        rules[rule] = {'id': rule, 'shortDescription': {'text': safe_title}}
         result = {'ruleId': rule, 'level': 'error' if f['severity'] in ('critical', 'high') else 'warning',
-                  'message': {'text': f['title']}, 'partialFingerprints': {'vulnforge/v1': f['key']}}
+                  'message': {'text': safe_title}, 'partialFingerprints': {'vulnforge/v1': f['key']}}
         if f.get('file_path'):
             result['locations'] = [{'physicalLocation': {'artifactLocation': {'uri': quote(f['file_path'], safe='/')},
                                     'region': {'startLine': max(1, details.get('line', 1))}}}]
