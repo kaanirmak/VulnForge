@@ -269,12 +269,26 @@ def parse_manifest(path: str, content: str, *, include_resolver=None, _visited=N
     elif name == 'Cargo.lock':
         obj = tomllib.loads(content)
         for item in obj.get('package',[]):
-            if item.get('source','').startswith('registry+'):
+            source = item.get('source', '')
+            if source.startswith('registry+') or source.startswith('git+'):
                 add(item.get('name'),item.get('version'),'crates.io')
     elif name == 'composer.lock':
         obj = json.loads(content)
         for item in obj.get('packages',[])+obj.get('packages-dev',[]):
-            add(item.get('name'),str(item.get('version','')).lstrip('v'),'Packagist')
+            dist = item.get('dist', {}) if isinstance(item.get('dist'), dict) else {}
+            source = item.get('source', {}) if isinstance(item.get('source'), dict) else {}
+            if dist.get('type') != 'path' and source.get('type') != 'path':
+                add(item.get('name'),str(item.get('version','')).lstrip('v'),'Packagist')
+    elif name == 'go.sum':
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith('//'):
+                continue
+            parts = line.split()
+            if len(parts) >= 2:
+                mod, raw_ver = parts[0], parts[1]
+                if not raw_ver.endswith('/go.mod'):
+                    add(mod, raw_ver, 'Go')
     elif name == 'go.mod':
         in_block=False
         for line in content.splitlines():
@@ -330,6 +344,9 @@ def inventory_manifest(path: str, content: str, *, include_resolver=None) -> Inv
         issues.append({'path': path, 'reason': 'transitive_graph_unavailable'})
     elif name == 'go.mod':
         issues.append({'path': path, 'reason': 'declared_modules_only_no_resolved_build_list'})
+    elif name == 'go.sum':
+        if not deps and content.strip():
+            issues.append({'path': path, 'reason': 'missing_package_inventory'})
     elif name == 'package-lock.json':
         obj = json.loads(content)
         if not isinstance(obj, dict) or not any(k in obj for k in ('packages', 'dependencies')):
@@ -370,8 +387,14 @@ def inventory_manifest(path: str, content: str, *, include_resolver=None) -> Inv
         for item in obj.get('package', []):
             if not item.get('name') or not item.get('version'):
                 issues.append({'path': path, 'reason': 'missing_package_identity'})
-            if name == 'Cargo.lock' and not item.get('source', '').startswith('registry+'):
-                issues.append({'path': path, 'reason': 'unresolved_local_or_git_package'})
+            if name == 'Cargo.lock':
+                source = item.get('source', '')
+                if not source:
+                    issues.append({'path': path, 'package': item.get('name'), 'reason': 'workspace_package_not_registry_resolved'})
+                elif source.startswith('git+'):
+                    issues.append({'path': path, 'package': item.get('name'), 'reason': 'git_package_source', 'source': source})
+                elif not source.startswith('registry+'):
+                    issues.append({'path': path, 'package': item.get('name'), 'reason': 'unresolved_local_or_git_package'})
             if name == 'poetry.lock' and item.get('source',{}).get('type') in ('git','directory','file','url'):
                 issues.append({'path':path,'reason':'unresolved_local_or_git_package'})
             if name == 'uv.lock':
@@ -393,11 +416,17 @@ def inventory_manifest(path: str, content: str, *, include_resolver=None) -> Inv
                     issues.append({'path': path, 'reason': 'unresolved_local_or_git_package'})
     elif name == 'composer.lock':
         obj = json.loads(content)
-        if 'packages' not in obj:
+        if 'packages' not in obj and 'packages-dev' not in obj:
             issues.append({'path': path, 'reason': 'missing_package_inventory'})
         for item in obj.get('packages', []) + obj.get('packages-dev', []):
             if not item.get('name') or not item.get('version'):
                 issues.append({'path': path, 'reason': 'missing_package_identity'})
+            dist = item.get('dist', {}) if isinstance(item.get('dist'), dict) else {}
+            source = item.get('source', {}) if isinstance(item.get('source'), dict) else {}
+            if dist.get('type') == 'path' or source.get('type') == 'path':
+                issues.append({'path': path, 'package': item.get('name'), 'reason': 'unresolved_or_local_package'})
+            elif source.get('type') == 'git' and not dist.get('reference'):
+                issues.append({'path': path, 'package': item.get('name'), 'reason': 'git_package_source', 'reference': source.get('reference')})
     else:
         issues.append({'path': path, 'reason': 'unsupported_manifest'})
     return InventoryResult(deps, issues)

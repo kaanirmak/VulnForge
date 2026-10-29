@@ -261,6 +261,79 @@ def test_npm_workspaces_aliases_links_and_pnpm_and_yarn_lockfiles():
     assert berry_deps[0].version == "18.2.0"
 
 
+def test_go_sum_rust_workspace_git_and_composer_source_isolation():
+    from vulnforge.dependencies import parse_manifest, inventory_manifest
+
+    # 1. go.sum parsing
+    go_sum = (
+        "golang.org/x/crypto v0.26.0 h1:xyz123=\n"
+        "golang.org/x/crypto v0.26.0/go.mod h1:mod123=\n"
+        "github.com/gin-gonic/gin v1.10.0 h1:gin123=\n"
+        "github.com/gin-gonic/gin v1.10.0/go.mod h1:ginmod=\n"
+    )
+    go_deps = parse_manifest("go.sum", go_sum)
+    assert len(go_deps) == 2
+    names = {d.name: d.version for d in go_deps}
+    assert names["golang.org/x/crypto"] == "v0.26.0"
+    assert names["github.com/gin-gonic/gin"] == "v1.10.0"
+    go_inv = inventory_manifest("go.sum", go_sum)
+    assert len(go_inv.dependencies) == 2
+    assert go_inv.issues == []
+
+    # 2. Cargo.lock with registry, git and local workspace member
+    cargo_content = (
+        'version = 3\n\n'
+        '[[package]]\n'
+        'name = "my-workspace-crate"\n'
+        'version = "0.1.0"\n'
+        'dependencies = ["serde", "git-helper"]\n\n'
+        '[[package]]\n'
+        'name = "serde"\n'
+        'version = "1.0.200"\n'
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n'
+        'checksum = "abc"\n\n'
+        '[[package]]\n'
+        'name = "git-helper"\n'
+        'version = "0.2.0"\n'
+        'source = "git+https://github.com/example/helper?rev=deadbeef#deadbeef"\n'
+    )
+    cargo_deps = parse_manifest("Cargo.lock", cargo_content)
+    c_names = {d.name: d.version for d in cargo_deps}
+    assert c_names["serde"] == "1.0.200"
+    assert c_names["git-helper"] == "0.2.0"
+    assert "my-workspace-crate" not in c_names
+
+    cargo_inv = inventory_manifest("Cargo.lock", cargo_content)
+    # my-workspace-crate flagged as workspace package not registry resolved
+    assert any(i.get("reason") == "workspace_package_not_registry_resolved" and i.get("package") == "my-workspace-crate" for i in cargo_inv.issues)
+    # git-helper flagged as git_package_source
+    assert any(i.get("reason") == "git_package_source" and i.get("package") == "git-helper" for i in cargo_inv.issues)
+
+    # 3. composer.lock with path/local and registry packages
+    composer_content = json.dumps({
+        "_readme": ["dummy"],
+        "packages": [
+            {
+                "name": "guzzlehttp/guzzle",
+                "version": "7.8.1",
+                "dist": {"type": "zip", "url": "https://api.github.com/...", "reference": "123"}
+            },
+            {
+                "name": "local/custom-lib",
+                "version": "1.0.0",
+                "dist": {"type": "path", "url": "../local-lib"}
+            }
+        ],
+        "packages-dev": []
+    })
+    comp_deps = parse_manifest("composer.lock", composer_content)
+    assert len(comp_deps) == 1
+    assert comp_deps[0].name == "guzzlehttp/guzzle"
+    assert comp_deps[0].version == "7.8.1"
+    comp_inv = inventory_manifest("composer.lock", composer_content)
+    assert any(i.get("reason") == "unresolved_or_local_package" and i.get("package") == "local/custom-lib" for i in comp_inv.issues)
+
+
 def test_incomplete_audit_cannot_resolve_old_findings_or_replace_inventory(tmp_path):
     async def run():
         store=Store(str(tmp_path/'db'))
