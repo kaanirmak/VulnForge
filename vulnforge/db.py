@@ -555,6 +555,72 @@ class Store:
                     self.audit_event(finding['repo'],finding['id'],'intelligence','advisory_withdrawn',{'advisory_id':canonical})
             return canonical
 
+    def _ensure_ingestion_table(self, c):
+        c.execute('''CREATE TABLE IF NOT EXISTS advisory_ingestion_state (
+            source TEXT NOT NULL,
+            catalog_scope TEXT NOT NULL DEFAULT 'public',
+            cursor TEXT,
+            last_record_id TEXT,
+            status TEXT NOT NULL DEFAULT 'idle',
+            error TEXT,
+            processed_count INTEGER NOT NULL DEFAULT 0,
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            last_success_at REAL,
+            updated_at REAL NOT NULL,
+            PRIMARY KEY(source, catalog_scope)
+        )''')
+
+    def get_ingestion_state(self, source: str, *, catalog_scope=None) -> dict | None:
+        scope = self._catalog_scope(catalog_scope)
+        with self.conn() as c:
+            self._ensure_ingestion_table(c)
+            row = c.execute(
+                'SELECT * FROM advisory_ingestion_state WHERE source=? AND catalog_scope=?',
+                (source, scope)
+            ).fetchone()
+            return dict(row) if row else None
+
+    _INGESTION_UNSET = object()
+
+    def update_ingestion_state(self, source: str, *, cursor=_INGESTION_UNSET,
+                               last_record_id=_INGESTION_UNSET, status: str = 'idle',
+                               error: str | None = None, processed_delta: int = 0,
+                               retry_increment: bool = False, reset_retry: bool = False,
+                               success: bool = False, catalog_scope=None):
+        scope = self._catalog_scope(catalog_scope)
+        now = time.time()
+        with self.transaction(), self.conn() as c:
+            self._ensure_ingestion_table(c)
+            prev = c.execute(
+                'SELECT * FROM advisory_ingestion_state WHERE source=? AND catalog_scope=?',
+                (source, scope)
+            ).fetchone()
+            cur_val = None if cursor is self._INGESTION_UNSET else cursor
+            last_id_val = None if last_record_id is self._INGESTION_UNSET else last_record_id
+            if prev is None:
+                new_retry = 1 if retry_increment else 0
+                new_count = processed_delta
+                succ_at = now if success else None
+                c.execute('''INSERT INTO advisory_ingestion_state
+                    (source, catalog_scope, cursor, last_record_id, status, error, processed_count, retry_count, last_success_at, updated_at)
+                    VALUES(?,?,?,?,?,?,?,?,?,?)''',
+                    (source, scope, cur_val, last_id_val, status, error, new_count, new_retry, succ_at, now))
+            else:
+                new_cursor = prev['cursor'] if cursor is self._INGESTION_UNSET else cursor
+                new_last_id = prev['last_record_id'] if last_record_id is self._INGESTION_UNSET else last_record_id
+                new_count = prev['processed_count'] + processed_delta
+                if reset_retry:
+                    new_retry = 0
+                elif retry_increment:
+                    new_retry = prev['retry_count'] + 1
+                else:
+                    new_retry = prev['retry_count']
+                succ_at = now if success else prev['last_success_at']
+                c.execute('''UPDATE advisory_ingestion_state
+                    SET cursor=?, last_record_id=?, status=?, error=?, processed_count=?, retry_count=?, last_success_at=?, updated_at=?
+                    WHERE source=? AND catalog_scope=?''',
+                    (new_cursor, new_last_id, status, error, new_count, new_retry, succ_at, now, source, scope))
+
     def advisory(self, id_, *, catalog_scope=None):
         scope=self._catalog_scope(catalog_scope)
         scoped_id=self._scoped_advisory_id(id_,scope)

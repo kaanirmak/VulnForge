@@ -294,3 +294,61 @@ def github_matches(saved, dependencies):
                              'ranges':[{'type':'ECOSYSTEM','events':events}]}]}
             matches.append((dep,advisory))
     return ('affected' if matches else 'under_investigation' if unknown else 'not_affected'),matches
+
+
+class AdvisoryIngestionRunner:
+    """Persistent cursor-based advisory ingestion job with interruption resume and retry tracking."""
+
+    def __init__(self, store, source_name: str, *, catalog_scope='public', max_retries: int = 3):
+        self.store = store
+        self.source_name = source_name
+        self.catalog_scope = catalog_scope
+        self.max_retries = max_retries
+
+    async def ingest_batch(self, fetcher):
+        """Execute one ingestion batch, updating persistent cursor and retry state.
+
+        fetcher: async callable(cursor: str | None) -> tuple[list[dict], str | None, bool]
+                 returns (advisories, next_cursor, has_more)
+        """
+        state = self.store.get_ingestion_state(self.source_name, catalog_scope=self.catalog_scope)
+        current_cursor = state['cursor'] if state else None
+        self.store.update_ingestion_state(
+            self.source_name,
+            status='running',
+            catalog_scope=self.catalog_scope
+        )
+        try:
+            advisories, next_cursor, has_more = await fetcher(current_cursor)
+            saved_ids = []
+            for adv in advisories:
+                adv_id = self.store.save_advisory(adv, source=self.source_name, catalog_scope=self.catalog_scope)
+                saved_ids.append(adv_id)
+
+            last_id = saved_ids[-1] if saved_ids else (state['last_record_id'] if state else None)
+            self.store.update_ingestion_state(
+                self.source_name,
+                cursor=next_cursor,
+                last_record_id=last_id,
+                status='idle' if not has_more else 'pending',
+                processed_delta=len(advisories),
+                reset_retry=True,
+                success=True,
+                error=None,
+                catalog_scope=self.catalog_scope
+            )
+            return {
+                'processed': len(advisories),
+                'cursor': next_cursor,
+                'has_more': has_more,
+                'status': 'success'
+            }
+        except Exception as exc:
+            self.store.update_ingestion_state(
+                self.source_name,
+                status='failed',
+                error=str(exc),
+                retry_increment=True,
+                catalog_scope=self.catalog_scope
+            )
+            raise
