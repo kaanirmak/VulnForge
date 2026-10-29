@@ -255,6 +255,107 @@ def enrich_recommendation_context(rec: dict, dep: Dependency, *, all_dependencie
     return rec
 
 
+def evaluate_remediation_priority(
+    finding_or_advisory: dict,
+    *,
+    metrics = None,
+    dependency: Dependency | None = None,
+    environment: str = 'production'
+) -> dict:
+    """Explainable prioritization separating CVSS technical severity from KEV, EPSS and exposure."""
+    rationale = []
+
+    # 1. Base CVSS severity
+    cvss_score = getattr(metrics, 'cvss_score', None) if metrics else None
+    cvss_severity = (getattr(metrics, 'cvss_severity', None) if metrics else None) or finding_or_advisory.get('severity', 'medium')
+    if cvss_score is not None:
+        rationale.append(f"CVSS base score: {cvss_score} ({cvss_severity})")
+    else:
+        rationale.append(f"Advisory severity: {cvss_severity}")
+
+    # 2. Real-world exploitation: KEV
+    in_kev = bool(getattr(metrics, 'kev_date_added', None)) if metrics else False
+    is_ransomware = bool(getattr(metrics, 'kev_ransomware', False)) if metrics else False
+    if in_kev:
+        kev_note = f"Active exploitation confirmed in CISA KEV (added: {metrics.kev_date_added})"
+        if is_ransomware:
+            kev_note += " with known ransomware campaign use"
+        rationale.append(kev_note)
+
+    # 3. EPSS prediction
+    epss_score = getattr(metrics, 'epss_score', None) if metrics else None
+    epss_percentile = getattr(metrics, 'epss_percentile', None) if metrics else None
+    high_epss = epss_score is not None and epss_score >= 0.15
+    if epss_score is not None:
+        pct = f" ({epss_percentile * 100:.1f}th percentile)" if epss_percentile is not None else ""
+        rationale.append(f"EPSS probability: {epss_score * 100:.2f}%{pct}")
+
+    # 4. Exposure & environment context
+    is_runtime = dependency.scope == 'runtime' if dependency else True
+    is_direct = dependency.direct if dependency else True
+    is_prod = environment in ('production', 'prod', 'public_facing')
+
+    if is_prod and is_runtime:
+        exposure = 'production_runtime'
+        rationale.append("High exposure: Runtime dependency deployed in production")
+    elif is_prod and not is_runtime:
+        exposure = 'production_dev'
+        rationale.append("Medium-low exposure: Development/build scope in production repository")
+    elif not is_prod and is_runtime:
+        exposure = 'non_production_runtime'
+        rationale.append("Moderate exposure: Runtime dependency in non-production environment")
+    else:
+        exposure = 'isolated_dev'
+        rationale.append("Low exposure: Development dependency in non-production environment")
+
+    if dependency and not is_direct:
+        rationale.append("Transitive dependency; exploitability depends on parent reachability")
+
+    # 5. Explainable Priority Decision
+    if in_kev and is_runtime:
+        priority = 'P0'
+        priority_label = 'critical'
+        sla_hours = 24
+        rationale.insert(0, "DECISION: P0 Critical due to active KEV exploitation in runtime scope")
+    elif (in_kev and not is_runtime) or (high_epss and (cvss_score or 0) >= 7.0 and is_runtime):
+        priority = 'P1'
+        priority_label = 'high'
+        sla_hours = 72
+        rationale.insert(0, "DECISION: P1 High due to active KEV or high EPSS combined with severe CVSS")
+    elif (cvss_score or 0) >= 9.0 and is_runtime and is_prod:
+        priority = 'P1'
+        priority_label = 'high'
+        sla_hours = 72
+        rationale.insert(0, "DECISION: P1 High due to Critical CVSS base score in production runtime")
+    elif (cvss_score or 0) >= 7.0 or high_epss or in_kev:
+        priority = 'P2'
+        priority_label = 'medium'
+        sla_hours = 336  # 14 days
+        rationale.insert(0, "DECISION: P2 Medium due to elevated CVSS or non-runtime exploitation indicators")
+    else:
+        priority = 'P3'
+        priority_label = 'low'
+        sla_hours = 720  # 30 days
+        rationale.insert(0, "DECISION: P3 Low due to baseline vulnerability without active exploit signals")
+
+    return {
+        'priority': priority,
+        'priority_label': priority_label,
+        'recommended_sla_hours': sla_hours,
+        'base_severity': cvss_severity,
+        'cvss_score': cvss_score,
+        'in_kev': in_kev,
+        'is_ransomware': is_ransomware,
+        'epss_score': epss_score,
+        'epss_percentile': epss_percentile,
+        'exposure_level': exposure,
+        'is_runtime': is_runtime,
+        'is_direct': is_direct,
+        'environment': environment,
+        'rationale': rationale
+    }
+
+
 def advisory_identity(advisory):
     identifiers = {advisory['id'], *advisory.get('aliases', [])}
     ghsas = sorted(value for value in identifiers if value.startswith('GHSA-'))

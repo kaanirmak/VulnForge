@@ -6,7 +6,7 @@
 
 ## Mevcut temel
 
-Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 698 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
+Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağlı tarama ve kapsama kayıtları, temel AST/regex scanner, OSV sorguları, desteklenen GitHub sürüm aralıkları, advisory→proje etkisi, doğrulanan güncelleme adayları, temel dashboard, SBOM/SARIF çıktıları, süreli suppression ve bulgu geçmişi. Gizlilik kapıları, PostgreSQL/migration ve identity temeli de eklendi. Son doğrulama: Python 3.11 + geçici gerçek PostgreSQL 14.23 ile 699 test geçti; GitHub/OSV çağrıları mock, canlı sağlayıcı kabul testi yapılmadı.
 
 ## A. Gizlilik ve güvenlik tasarımı — P0
 
@@ -97,7 +97,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `PackageRegistryVerifier` (PyPI, npm, crates.io) entegrasyonuyla `recommend_updates` motorunda yayımlanmamış, geri çekilmiş (yanked) veya kullanımdan kaldırılmış (deprecated) aday sürümlerin elenmesi ve temiz yayınlanmış sürümlerin seçilmesi tamamlandı.
 - [x] VF-058: Constraint, parent bağımlılık, override ve major geçiş gereksinimini öneriye ekle.
   `enrich_recommendation_context` ile doğrudan/dolaylı paketler için parent paket tespiti, ekosisteme özel override stratejileri (npm overrides, pip constraints, cargo patch vb.) ve major sürüm kırılma riski uyarıları eklendi.
-- [ ] VF-059: CVSS severity ile müdahale önceliğini ayır; KEV/EPSS, ortam ve exposure üzerinden açıklanabilir politika uygula.
+- [x] VF-059: CVSS severity ile müdahale önceliğini ayır; KEV/EPSS, ortam ve exposure üzerinden açıklanabilir politika uygula.
+  `evaluate_remediation_priority` ile teorik CVSS teknik şiddeti; gerçek CISA KEV sömürüsü, EPSS tahmin olasılığı ve runtime/dev/üretim ortamı exposure seviyeleriyle ayrıştırıldı; P0-P3 aksiyon sınıfları, SLA saatleri ve açıklanabilir gerekçe (`rationale`) modelleri tamamlandı.
 - [ ] VF-060: Düzeltme olmayan açıklar için mitigasyon, yeniden kontrol ve sahip/SLA takibi oluştur.
 
 ## G. Güvenli düzeltme ve PR — P1
