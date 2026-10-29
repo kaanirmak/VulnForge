@@ -23,6 +23,7 @@ class GitHub:
         self.client = client or httpx.AsyncClient(timeout=20, follow_redirects=False)
         self.owns_client = client is None
         self.tokens: dict[int, tuple[str, float]] = {}
+        self.pr_base_shas: dict[tuple[str, int, str], str] = {}
         self._job=None
         self._guard=None
 
@@ -300,6 +301,9 @@ class GitHub:
             pr=await self.request('GET',prefix,installation_id)
             if pr['head']['sha']!=expected_sha:
                 raise GitHubError('Pull request HEAD changed; scan the new event instead')
+            base_sha=(pr.get('base') or {}).get('sha','') if isinstance(pr.get('base'),dict) else ''
+            if isinstance(base_sha,str) and SHA_RE.fullmatch(base_sha):
+                self.pr_base_shas[(repo,int(number),expected_sha)]=base_sha
             return pr
         pr=await verify()
         files=[]
@@ -315,21 +319,35 @@ class GitHub:
                 return files
         raise GitHubError('PR file pagination limit exceeded')
 
+    def pull_base_sha(self, repo: str, number: int, expected_sha: str) -> str | None:
+        return self.pr_base_shas.get((repo,int(number),expected_sha))
+
     async def publish_check(self, repo, installation_id, scan):
         """Publish coverage and annotations in batches of at most 50."""
         findings=scan['findings']
+        cov=scan.get('coverage') if isinstance(scan.get('coverage'),dict) else {}
+        base_complete=cov.get('base_comparison')=='complete'
+        blocking=[f for f in findings if (f.get('details') or {}).get('diff_status')!='pre_existing'] if base_complete else findings
         conclusion=('action_required' if scan['state']!='complete' else
-                    'failure' if any(f['severity'] in ('high','critical') for f in findings) else 'success')
+                    'failure' if any(f['severity'] in ('high','critical') for f in blocking) else 'success')
         annotations=[]
         for f in findings:
-            line=f['details'].get('line')
+            details=f.get('details') or {}
+            line=details.get('line')
             if not f.get('file_path') or not isinstance(line,int) or line<1:
                 continue
+            status_tag=details.get('diff_status')
+            prefix='[NEW] ' if status_tag=='new' else ('[PRE-EXISTING] ' if status_tag=='pre_existing' else '')
+            level=('notice' if status_tag=='pre_existing' else
+                   ('failure' if f['severity'] in ('high','critical') else 'warning'))
             annotations.append({'path':f['file_path'],'start_line':line,'end_line':line,
-                                'annotation_level':'failure' if f['severity'] in ('high','critical') else 'warning',
-                                'message':f['title'][:2000]})
+                                'annotation_level':level,
+                                'message':(prefix+f['title'])[:2000]})
+        diff_note=''
+        if 'findings_new' in cov and 'findings_pre_existing' in cov:
+            diff_note=f" (new: {cov['findings_new']}, pre-existing: {cov['findings_pre_existing']})"
         output={'title':f"VulnForge {scan['kind']}: {scan['state']}",
-                'summary':f"Snapshot: `{scan['commit_sha']}`\n\nAnalysis: **{scan['state']}**; {len(findings)} findings. "
+                'summary':f"Snapshot: `{scan['commit_sha']}`\n\nAnalysis: **{scan['state']}**; {len(findings)} findings{diff_note}. "
                           'This result covers only the stated scan scope. Reachability is unknown.',
                 'annotations':annotations[:50]}
         path=f'{self.repo_path(repo)}/check-runs'

@@ -13,7 +13,12 @@ from .dependencies import inventory_manifest, Dependency
 from .github import GitHub
 from .osv import OSV
 from .kev import KEV
-from .scanner import scan_code, normalize_finding
+from .scanner import (
+    classify_pr_code_findings,
+    classify_pr_dependency_findings,
+    normalize_finding,
+    scan_code,
+)
 from .intelligence import recommend_updates, advisory_identity, github_matches
 
 log=logging.getLogger('vulnforge')
@@ -62,8 +67,11 @@ class Agent:
         elif job['kind']=='commit_scan':
             await self.scan_commit(repo,installation_id,payload['sha'])
         elif job['kind']=='pull_request_scan':
-            await self.scan_commit(repo,installation_id,payload['sha'],payload['number'])
-            await self.audit(repo,installation_id,row['default_branch'],snapshot_sha=payload['sha'])
+            base_sha=payload.get('base_sha')
+            await self.scan_commit(repo,installation_id,payload['sha'],payload['number'],base_sha=base_sha)
+            if not base_sha and hasattr(self.github,'pull_base_sha'):
+                base_sha=self.github.pull_base_sha(repo,payload['number'],payload['sha'])
+            await self.audit(repo,installation_id,row['default_branch'],snapshot_sha=payload['sha'],base_sha=base_sha)
         elif job['kind']=='dependency_audit':
             await self.audit(repo,installation_id,row['default_branch'],trigger_advisory=payload.get('advisory_id'))
         else:
@@ -99,15 +107,17 @@ class Agent:
             self.store.record_branch_head(repo,payload['after'])
             self.store.enqueue('dependency_audit',repo,{},f'audit:push:{repo}:{payload["after"]}')
 
-    async def scan_commit(self, repo: str, installation_id: int, sha: str, pr_number=None):
+    async def scan_commit(self, repo: str, installation_id: int, sha: str, pr_number=None, base_sha: str | None = None):
         self.cfg.require_source_access()
         scan_id=self.store.start_scan(repo,'pull_request' if pr_number else 'commit',sha)
         coverage={'files_total':0,'files_scanned':0,'files_skipped':0,'issues':[], 'scope':'changed_files'}
         try:
             files=(await self.github.pull_files(repo,installation_id,pr_number,sha) if pr_number
                    else await self.github.changed_files(repo,installation_id,sha))
+            if pr_number and not base_sha and hasattr(self.github,'pull_base_sha'):
+                base_sha=self.github.pull_base_sha(repo,pr_number,sha)
             coverage['files_total']=len(files)
-            await self._scan_files(repo,installation_id,sha,files,scan_id,coverage,persist=not pr_number)
+            await self._scan_files(repo,installation_id,sha,files,scan_id,coverage,persist=not pr_number,base_sha=base_sha if pr_number else None)
         except Exception:
             coverage['issues'].append({'reason':'provider_or_analysis_error'})
             coverage['files_unprocessed']=coverage['files_total']-coverage['files_scanned']-coverage['files_skipped']
@@ -118,7 +128,12 @@ class Agent:
         if self.cfg.enable_checks:
             await self.github.publish_check(repo,installation_id,self.store.scan(scan_id))
 
-    async def _scan_files(self, repo, installation_id, sha, files, scan_id, coverage, persist=True):
+    async def _scan_files(self, repo, installation_id, sha, files, scan_id, coverage, persist=True, base_sha=None):
+        if base_sha:
+            coverage['base_sha']=base_sha
+            coverage['findings_new']=0
+            coverage['findings_pre_existing']=0
+            base_complete=True
         for item in files:
             path=item.get('filename','')
             if item.get('status')=='removed' or not path.endswith(CODE_SUFFIXES):
@@ -148,20 +163,41 @@ class Agent:
                 except SyntaxError:
                     coverage['issues'].append({'path':path,'reason':'python_parse_error'})
             coverage['files_scanned']+=1
-            for f in scan_code(path,file['text']):
+            head_findings=scan_code(path,file['text'])
+            if base_sha:
+                if item.get('status')=='added':
+                    head_findings=classify_pr_code_findings(head_findings,[],base_sha=base_sha)
+                else:
+                    base_path=item.get('previous_filename') or path
+                    base_file=await self.github.get_file(repo,installation_id,base_path,base_sha)
+                    if base_file is None or len(base_file['text'])>300_000 or len(base_file['text'].splitlines())>10000:
+                        base_complete=False
+                        for f in head_findings:
+                            f['details']['base_sha']=base_sha
+                            f['details']['diff_status']='unknown'
+                    else:
+                        base_findings=scan_code(path,base_file['text'])
+                        head_findings=classify_pr_code_findings(head_findings,base_findings,base_sha=base_sha)
+                for f in head_findings:
+                    status_tag=f['details'].get('diff_status')
+                    if status_tag=='pre_existing': coverage['findings_pre_existing']+=1
+                    elif status_tag=='new': coverage['findings_new']+=1
+            for f in head_findings:
                 self.store.record_scan_finding(scan_id,f)
                 if persist:
                     self.store.save_finding(repo,f['key'],'code',f['severity'],f['title'],
                                             path,sha,f['details'])
+        if base_sha:
+            coverage['base_comparison']='complete' if base_complete else 'incomplete'
 
-    async def audit(self, repo: str, installation_id: int, default_branch: str, snapshot_sha=None, trigger_advisory=None):
+    async def audit(self, repo: str, installation_id: int, default_branch: str, snapshot_sha=None, trigger_advisory=None, base_sha: str | None = None):
         scan_id=self.store.start_scan(repo,'pr_dependencies' if snapshot_sha else 'dependencies',snapshot_sha)
         coverage={'files_total':0,'files_scanned':0,'files_skipped':0,'issues':[], 'manifests':[], 'scope':'dependency_manifests'}
         if trigger_advisory: coverage['trigger_advisory']=trigger_advisory
         deps=[]
         try:
             self.cfg.require_source_access()
-            await self._audit(repo,installation_id,default_branch,scan_id,coverage,deps,snapshot_sha)
+            await self._audit(repo,installation_id,default_branch,scan_id,coverage,deps,snapshot_sha,base_sha=base_sha)
         except Exception:
             coverage['issues'].append({'reason':'inventory_or_feed_error'})
             self.store.finish_scan(scan_id,'failed',coverage,[asdict(d) for d in deps])
@@ -170,7 +206,7 @@ class Agent:
         if self.cfg.enable_checks:
             await self.github.publish_check(repo,installation_id,self.store.scan(scan_id))
 
-    async def _audit(self, repo, installation_id, default_branch, scan_id, coverage, deps, snapshot_sha):
+    async def _audit(self, repo, installation_id, default_branch, scan_id, coverage, deps, snapshot_sha, base_sha=None):
         actual_branch=await self.github.default_branch(repo,installation_id)
         if actual_branch!=default_branch:
             self.store.upsert_repo(repo,installation_id,actual_branch)
@@ -200,6 +236,27 @@ class Agent:
                 coverage['issues'].append({'path':path,'reason':'manifest_parse_error','error_type':type(exc).__name__})
         if len(deps)>1500:
             raise RuntimeError('Dependency inventory exceeds 1500 packages; split audit required')
+        base_packages=set()
+        base_complete=True
+        if snapshot_sha and base_sha:
+            coverage['base_sha']=base_sha
+            coverage['findings_new']=0
+            coverage['findings_pre_existing']=0
+            try:
+                base_paths=await self.github.manifest_paths(repo,installation_id,base_sha)
+                for bpath in base_paths:
+                    bfile=await self.github.get_file(repo,installation_id,bpath,base_sha)
+                    if bfile is None:
+                        base_complete=False
+                        continue
+                    bresult=inventory_manifest(bpath,bfile['text'])
+                    if bresult.issues:
+                        base_complete=False
+                    for bdep in bresult.dependencies:
+                        base_packages.add((bdep.file_path,bdep.ecosystem,bdep.name,bdep.version))
+            except Exception:
+                base_complete=False
+            coverage['base_comparison']='complete' if base_complete else 'incomplete'
         affected=await self.osv.check(deps)
         coverage['intelligence_checked_at']=time.time()
         coverage['intelligence_source']=self.cfg.intelligence_mode
@@ -261,6 +318,17 @@ class Agent:
                     file_path=dep.file_path,ecosystem=dep.ecosystem,
                     package=dep.name,version=dep.version,advisory_id=id_,
                     scanner='osv',details=details)
+                if snapshot_sha and base_sha:
+                    if base_complete:
+                        norm_dep=classify_pr_dependency_findings(
+                            [norm_dep],base_packages=base_packages,base_sha=base_sha)[0]
+                        if norm_dep['details'].get('diff_status')=='pre_existing':
+                            coverage['findings_pre_existing']+=1
+                        else:
+                            coverage['findings_new']+=1
+                    else:
+                        norm_dep['details']['base_sha']=base_sha
+                        norm_dep['details']['diff_status']='unknown'
                 self.store.record_scan_finding(scan_id,norm_dep)
                 if not snapshot_sha:
                     self.store.save_finding(repo,norm_dep['key'],'dependency',severity,title,dep.file_path,head,norm_dep['details'])

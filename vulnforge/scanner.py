@@ -148,7 +148,9 @@ def to_runner_finding(normalized: dict, *, path_pseudonym: str | None = None) ->
     }
 
 
-def finding(path: str, line: int, rule: str, title: str, severity: str, snippet: str, *, scanner: str = 'builtin'):
+def finding(path: str, line: int, rule: str, title: str, severity: str, snippet: str,
+            *, scanner: str = 'builtin', line_signature: str | None = None):
+    extra = {'line_signature': line_signature} if line_signature else None
     return normalize_finding(
         category='code',
         severity=severity,
@@ -158,7 +160,80 @@ def finding(path: str, line: int, rule: str, title: str, severity: str, snippet:
         rule=rule,
         snippet=snippet,
         scanner=scanner,
+        details=extra,
     )
+
+
+def _line_sig(rule: str, title: str, raw_line: str = '', *, is_secret: bool = False) -> str:
+    if is_secret or any(rx.search(raw_line) for _, rx in SECRETS):
+        token = f'{rule}:{title}'
+    else:
+        normalized_line = ' '.join(raw_line.split())
+        token = f'{rule}:{title}:{normalized_line}'
+    return hashlib.sha256(token.encode()).hexdigest()[:32]
+
+
+def classify_pr_code_findings(head_findings: list[dict], base_findings: list[dict],
+                              *, base_sha: str | None = None) -> list[dict]:
+    """Compare PR head code findings against base findings to separate new vs pre_existing."""
+    remaining = list(base_findings)
+    classified = []
+    # Pass 1: exact key match (same path, line, rule)
+    unmatched_indices = []
+    for idx, item in enumerate(head_findings):
+        copy = {**item, 'details': dict(item.get('details') or {})}
+        if base_sha:
+            copy['details']['base_sha'] = base_sha
+        match_pos = next((i for i, b in enumerate(remaining) if b.get('key') == copy.get('key')), None)
+        if match_pos is not None:
+            matched = remaining.pop(match_pos)
+            copy['details']['diff_status'] = 'pre_existing'
+            copy['details']['base_line'] = (matched.get('details') or {}).get('line')
+            classified.append(copy)
+        else:
+            classified.append(copy)
+            unmatched_indices.append(idx)
+    # Pass 2: line-shifted match by (rule, line_signature/title)
+    for idx in unmatched_indices:
+        copy = classified[idx]
+        d = copy['details']
+        rule = d.get('rule')
+        sig = d.get('line_signature') or copy.get('title')
+        match_pos = next(
+            (i for i, b in enumerate(remaining)
+             if (b.get('details') or {}).get('rule') == rule
+             and ((b.get('details') or {}).get('line_signature') or b.get('title')) == sig),
+            None,
+        )
+        if match_pos is not None:
+            matched = remaining.pop(match_pos)
+            d['diff_status'] = 'pre_existing'
+            d['base_line'] = (matched.get('details') or {}).get('line')
+        else:
+            d['diff_status'] = 'new'
+    return classified
+
+
+def classify_pr_dependency_findings(head_findings: list[dict],
+                                    *, base_keys: set[str] | None = None,
+                                    base_packages: set[tuple[str, str, str, str]] | None = None,
+                                    base_sha: str | None = None) -> list[dict]:
+    """Compare PR head dependency findings against base inventory/keys."""
+    keys = base_keys or set()
+    packages = base_packages or set()
+    classified = []
+    for item in head_findings:
+        copy = {**item, 'details': dict(item.get('details') or {})}
+        d = copy['details']
+        if base_sha:
+            d['base_sha'] = base_sha
+        pkg_tuple = (copy.get('file_path'), d.get('ecosystem'), d.get('package'), d.get('version'))
+        if copy.get('key') in keys or pkg_tuple in packages:
+            d['diff_status'] = 'pre_existing'
+        else:
+            d['diff_status'] = 'new'
+        classified.append(copy)
+    return classified
 
 
 def scan_code(path: str, source: str):
@@ -169,8 +244,10 @@ def scan_code(path: str, source: str):
     for n, line in enumerate(lines,1):
         for name, regex in SECRETS:
             if regex.search(line):
-                results.append(finding(path,n,'hardcoded-secret',f'Possible {name} in source','high',
-                                       '[REDACTED: possible secret]'))
+                title = f'Possible {name} in source'
+                results.append(finding(path,n,'hardcoded-secret',title,'high',
+                                       '[REDACTED: possible secret]',
+                                       line_signature=_line_sig('hardcoded-secret', title, is_secret=True)))
                 break
     if path.endswith('.py'):
         try:
@@ -186,22 +263,30 @@ def scan_code(path: str, source: str):
             n=getattr(node,'lineno',0)
             snippet=(lines[n-1].strip() if 0 < n <= len(lines) else '')
             if call_name in ('eval','exec'):
+                title = 'Dynamic Python evaluation can execute attacker-controlled input'
                 results.append(finding(path,n,'dynamic-execution',
-                    'Dynamic Python evaluation can execute attacker-controlled input','high',
-                    '[CODE OMITTED; inspect referenced line]'))
+                    title,'high',
+                    '[CODE OMITTED; inspect referenced line]',
+                    line_signature=_line_sig('dynamic-execution', title, snippet)))
             if call_name in ('run','Popen','call','check_output','check_call') and any(
                 kw.arg=='shell' and isinstance(kw.value,ast.Constant) and kw.value.value is True
                 for kw in node.keywords):
+                title = 'Subprocess invoked with shell=True'
                 results.append(finding(path,n,'subprocess-shell',
-                    'Subprocess invoked with shell=True','medium',
-                    '[CODE OMITTED; inspect referenced line]'))
+                    title,'medium',
+                    '[CODE OMITTED; inspect referenced line]',
+                    line_signature=_line_sig('subprocess-shell', title, snippet)))
     if path.endswith(('.js','.ts','.jsx','.tsx')):
         for n,line in enumerate(lines,1):
             if re.search(r'\beval\s*\(', line):
-                results.append(finding(path,n,'js-eval','JavaScript eval() usage','high',
-                                       '[CODE OMITTED; inspect referenced line]'))
+                title = 'JavaScript eval() usage'
+                results.append(finding(path,n,'js-eval',title,'high',
+                                       '[CODE OMITTED; inspect referenced line]',
+                                       line_signature=_line_sig('js-eval', title, line)))
             if re.search(r'\.innerHTML\s*=',line):
+                title = 'HTML sink; verify input escaping/sanitization'
                 results.append(finding(path,n,'inner-html',
-                    'HTML sink; verify input escaping/sanitization','medium',
-                    '[CODE OMITTED; inspect referenced line]'))
+                    title,'medium',
+                    '[CODE OMITTED; inspect referenced line]',
+                    line_signature=_line_sig('inner-html', title, line)))
     return results

@@ -381,3 +381,113 @@ def test_unsupported_and_unlocked_manifests_are_visible():
             assert 'frontend/package.json' not in paths
             assert set(paths)=={'frontend/package-lock.json','other/package.json','backend/uv.lock','service/pom.xml'}
     asyncio.run(run())
+
+
+def test_pr_base_head_comparison_separates_new_and_pre_existing_findings(tmp_path):
+    base_sha='1'*40
+    head_sha='2'*40
+    client,store=setup(tmp_path)
+    body=json.dumps({
+        'installation':{'id':1},
+        'repository':{'full_name':'o/r','default_branch':'main'},
+        'action':'synchronize',
+        'number':12,
+        'pull_request':{'base':{'sha':base_sha},'head':{'sha':head_sha}},
+    }).encode()
+    res=client.post('/github/webhook',content=body,headers=signed('pull_request',body))
+    assert res.status_code==202 and res.json()['queued']==1
+    job=store.claim()
+    assert json.loads(job['payload'])=={'sha':head_sha,'number':12,'base_sha':base_sha}
+
+    published_checks=[]
+    class PRGitHub(FakeGitHub):
+        async def default_branch(self,repo,install): return 'main'
+        async def pull_files(self,repo,install,number,expected_sha):
+            return [
+                {'filename':'app.py','status':'modified'},
+                {'filename':'new_mod.py','status':'added'},
+            ]
+        async def manifest_paths(self,repo,install,sha):
+            return ['package-lock.json']
+        async def get_file(self,repo,install,path,ref):
+            if path=='app.py' and ref==base_sha:
+                return {'sha':'c'*40,'path':path,'text':'x = 1\neval(user_data)\n'}
+            if path=='app.py' and ref==head_sha:
+                # Shifted eval(user_data) by 2 lines + added subprocess.run(..., shell=True)
+                return {'sha':'d'*40,'path':path,'text':'# header\n# comment\nx = 1\neval(user_data)\nimport subprocess\nsubprocess.run(cmd, shell=True)\n'}
+            if path=='new_mod.py' and ref==head_sha:
+                return {'sha':'e'*40,'path':path,'text':'eval(other_input)\n'}
+            if path=='package-lock.json' and ref==base_sha:
+                return {'sha':'f'*40,'path':path,'text':json.dumps({
+                    'lockfileVersion':3,
+                    'packages':{'node_modules/legacy-pkg':{'version':'1.0.0'}}
+                })}
+            if path=='package-lock.json' and ref==head_sha:
+                return {'sha':'0'*40,'path':path,'text':json.dumps({
+                    'lockfileVersion':3,
+                    'packages':{
+                        'node_modules/legacy-pkg':{'version':'1.0.0'},
+                        'node_modules/new-vuln':{'version':'2.0.0'},
+                    }
+                })}
+            return None
+        async def publish_check(self,repo,install,scan):
+            published_checks.append(scan)
+
+    class PROSV:
+        async def check(self,deps):
+            out=[]
+            for dep in deps:
+                if dep.name=='legacy-pkg':
+                    out.append((dep,{'id':'GHSA-legacy','aliases':['CVE-2025-0001'],'severity':[{'type':'CVSS_V3','score':'HIGH'}],'summary':'Legacy issue'}))
+                elif dep.name=='new-vuln':
+                    out.append((dep,{'id':'GHSA-new','aliases':['CVE-2025-0002'],'severity':[{'type':'CVSS_V3','score':'HIGH'}],'summary':'New issue'}))
+            return out
+
+    async def run():
+        agent=Agent(Config(enable_checks=True),store,PRGitHub(),PROSV())
+        await agent.process(job)
+        store.finish(job)
+    asyncio.run(run())
+
+    assert len(published_checks)==2
+    code_scan=next(s for s in published_checks if s['kind']=='pull_request')
+    dep_scan=next(s for s in published_checks if s['kind']=='pr_dependencies')
+
+    assert code_scan['coverage']['base_sha']==base_sha
+    assert code_scan['coverage']['base_comparison']=='complete'
+    assert code_scan['coverage']['findings_pre_existing']==1
+    assert code_scan['coverage']['findings_new']==2
+    by_file_rule={(f['file_path'],f['details']['rule']):f['details'] for f in code_scan['findings']}
+    assert by_file_rule[('app.py','dynamic-execution')]['diff_status']=='pre_existing'
+    assert by_file_rule[('app.py','dynamic-execution')]['base_line']==2
+    assert by_file_rule[('app.py','subprocess-shell')]['diff_status']=='new'
+    assert by_file_rule[('new_mod.py','dynamic-execution')]['diff_status']=='new'
+
+    assert dep_scan['coverage']['base_sha']==base_sha
+    assert dep_scan['coverage']['base_comparison']=='complete'
+    assert dep_scan['coverage']['findings_pre_existing']==1
+    assert dep_scan['coverage']['findings_new']==1
+    by_pkg={f['details']['package']:f['details']['diff_status'] for f in dep_scan['findings']}
+    assert by_pkg=={'legacy-pkg':'pre_existing','new-vuln':'new'}
+
+    # Verify GitHub check conclusion treats pre-existing-only PR scan as success with notice annotation
+    check_calls=[]
+    def handler(req):
+        check_calls.append(json.loads(req.content))
+        return httpx.Response(200,json={'id':99})
+    async def run_check():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+            gh=GitHub(Config(enable_checks=True),http)
+            async def token(_): return 'dummy'
+            gh.token=token
+            pre_only={
+                'id':'scan-pre','kind':'pull_request','commit_sha':head_sha,'state':'complete',
+                'coverage':{'base_comparison':'complete','findings_new':0,'findings_pre_existing':1},
+                'findings':[{'file_path':'app.py','severity':'high','title':'Old eval','details':{'line':4,'diff_status':'pre_existing'}}],
+            }
+            await gh.publish_check('o/r',1,pre_only)
+    asyncio.run(run_check())
+    assert check_calls[0]['output']['annotations'][0]['annotation_level']=='notice'
+    assert check_calls[0]['output']['annotations'][0]['message'].startswith('[PRE-EXISTING] ')
+    assert check_calls[-1]['conclusion']=='success'

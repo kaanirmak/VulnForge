@@ -252,9 +252,13 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
             if event=='pull_request' and action in ('opened','synchronize','reopened','ready_for_review'):
                 pr=data.get('pull_request') or {}
                 sha=(pr.get('head') or {}).get('sha','')
+                base_sha=(pr.get('base') or {}).get('sha','')
                 number=data.get('number')
                 if isinstance(sha,str) and SHA_RE.fullmatch(sha) and type(number) is int and number>0:
-                    queued+=store.enqueue('pull_request_scan',name,{'sha':sha,'number':number},f'pr:{name}:{number}:{sha}')
+                    payload={'sha':sha,'number':number}
+                    if isinstance(base_sha,str) and SHA_RE.fullmatch(base_sha):
+                        payload['base_sha']=base_sha
+                    queued+=store.enqueue('pull_request_scan',name,payload,f'pr:{name}:{number}:{sha}')
             elif event=='push' and not data.get('deleted',False) and data.get('after')!='0'*40 and data.get('ref','').startswith('refs/heads/'):
                 after=data.get('after','')
                 before=data.get('before','')
