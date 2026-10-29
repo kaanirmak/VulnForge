@@ -5,7 +5,7 @@ import time
 from fastapi.testclient import TestClient
 import pytest
 
-from test_database import pg_store,pg_customer,pg_operator
+from test_database import pg_store,pg_customer,pg_operator,pg_worker
 from test_organization import seed,config,client_for,ROOT
 from vulnforge.api import create_app
 from vulnforge.auth import AuthSessions,digest
@@ -14,7 +14,7 @@ from vulnforge.db import Store
 from vulnforge.identity import Identities
 from vulnforge.organization import OrganizationData
 from vulnforge.permissions import PERMISSIONS
-from vulnforge.rls import CustomerStore,identifier,validate_role
+from vulnforge.rls import CustomerStore,WorkerStore,identifier,validate_role
 
 
 def test_migration_splitter_keeps_function_bodies_and_quoted_semicolons():
@@ -115,16 +115,27 @@ def test_raw_sql_viewer_cannot_triage_and_analyst_cannot_accept_risk(scoped):
     _,customer,(_,_,_,_,findings),_,scope=scoped
     with scope(role='viewer'),customer.conn() as c:
         assert c.execute("UPDATE public.findings SET status='resolved' WHERE id=?",(findings['alpha'],)).rowcount==0
+        assert c.execute("UPDATE public.findings SET status='false_positive' WHERE id=?",(findings['alpha'],)).rowcount==0
+    with scope(role='analyst'),customer.conn() as c:
+        assert c.execute("UPDATE public.findings SET status='false_positive' WHERE id=?",(findings['alpha'],)).rowcount==1
+    with pytest.raises(DatabaseError,match='42501'):
+        with scope(role='analyst'),customer.conn() as c:
+            c.execute("UPDATE public.findings SET status='risk_accepted' WHERE id=?",(findings['alpha'],))
     with pytest.raises(DatabaseError,match='42501'):
         with scope(role='analyst'),customer.conn() as c:
             c.execute('INSERT INTO public.suppressions VALUES(?,?,?)',(findings['alpha'],'Fixture accepted',time.time()+60))
+    with scope(role='maintainer'),customer.conn() as c:
+        c.execute('DELETE FROM public.suppressions WHERE finding_id=?',(findings['alpha'],))
+        c.execute('INSERT INTO public.suppressions VALUES(?,?,?)',
+                  (findings['alpha'],'Fixture accepted',time.time()+60))
+        assert c.execute("UPDATE public.findings SET status='risk_accepted' WHERE id=?",(findings['alpha'],)).rowcount==1
 
 
 def test_database_role_matrix_matches_application_policy(scoped):
     _,customer,_,_,scope=scoped
     for role,allowed in PERMISSIONS.items():
         with scope(role=role),customer.conn() as c:
-            for action in ('project.read','finding.read','scan.read','impact.read','export.read','finding.triage','finding.suppress','audit.read','unknown'):
+            for action in ('project.read','finding.read','scan.read','impact.read','export.read','finding.triage','finding.accept_risk','finding.suppress','audit.read','unknown'):
                 assert c.execute('SELECT vf_security.permits(?)',(action,)).fetchone()[0]==(action in allowed),(role,action)
 
 
@@ -271,8 +282,11 @@ def test_non_system_schema_with_pg_letters_cannot_hide_excess_grants(pg_store,pg
     with pytest.raises(DatabaseError,match='table grant'): CustomerStore(pg_customer.path)
 
 
-def test_policies_work_when_functions_and_tables_have_a_non_superuser_owner(pg_store,pg_customer,pg_operator):
-    import uuid
+def test_policies_work_when_functions_and_tables_have_a_non_superuser_owner(pg_store,pg_customer,pg_operator,pg_worker):
+    import asyncio,uuid
+    from support import managed_config
+    from test_agent import FakeGitHub,FakeOSV
+    from vulnforge.worker import Agent
     role='vf_migration_'+uuid.uuid4().hex
     members,orgs,repos,scans,findings=seed(pg_store)
     with pg_store.conn() as c:
@@ -295,8 +309,54 @@ def test_policies_work_when_functions_and_tables_have_a_non_superuser_owner(pg_s
         for path in ('/findings','/scans/'+scans['alpha']+'/sarif','/advisories'):
             response=client.get(ROOT+'/'+orgs['alpha']+path)
             assert response.status_code==200 and 'bravo' not in response.text
+        pg_operator.enqueue('dependency_audit',repos['alpha'],{},'worker-non-superuser-job')
+        job=pg_operator.claim()
+        asyncio.run(Agent(managed_config(),pg_worker,FakeGitHub(),FakeOSV()).process(job))
+        pg_operator.finish(job)
     finally:
         transfer(original)
         with pg_store.conn() as c:
             c.execute(f'DROP OWNED BY {identifier(role)}')
             c.execute(f'DROP ROLE {identifier(role)}')
+
+
+def test_worker_rls_isolates_job_execution_and_blocks_foreign_and_privileged_tables(pg_store,pg_operator,pg_worker):
+    import asyncio
+    from support import managed_config
+    from test_agent import FakeGitHub,FakeOSV
+    from vulnforge.db import StaleJob
+    from vulnforge.worker import Agent
+    members,orgs,repos,scans,findings=seed(pg_store)
+    with pg_worker.conn() as c:
+        for table in ('repositories','findings','scans','jobs','dependency_inventory','advisory_impacts','remediation_policies'):
+            assert c.execute(f'SELECT COUNT(*) FROM public.{table}').fetchone()[0]==0
+        for forbidden in ('users','user_sessions','organizations','invitations','deliveries','runner_reports','schema_migrations'):
+            with pytest.raises(DatabaseError,match='42501'):
+                c.execute(f'SELECT * FROM public.{forbidden}')
+        with pytest.raises(DatabaseError,match='42501'):
+            c.execute('SELECT * FROM public.audit_events')
+    pg_operator.enqueue('dependency_audit',repos['alpha'],{},'worker-rls-alpha')
+    job=pg_operator.claim()
+    with pg_worker.job_scope(job),pg_worker.conn() as c:
+        assert [r['full_name'] for r in c.execute('SELECT full_name FROM public.repositories')]==[repos['alpha']]
+        assert [r['repo'] for r in c.execute('SELECT repo FROM public.findings')]==[repos['alpha']]
+        assert c.execute("UPDATE public.findings SET status='resolved' WHERE id=?",(findings['bravo'],)).rowcount==0
+    for forbidden_sql in (
+        f"UPDATE public.repositories SET installation_id=999 WHERE full_name='{repos['alpha']}'",
+        'DELETE FROM public.audit_events',
+    ):
+        with pytest.raises(DatabaseError,match='42501'):
+            with pg_worker.job_scope(job),pg_worker.conn() as c:
+                c.execute(forbidden_sql)
+    wcfg=managed_config(intelligence_mode='private_osv',osv_api_url='https://osv.internal.example',enable_auto_pr=True)
+    Identities(pg_operator).set_remediation_policy(
+        orgs['alpha'],repos['alpha'],members['alpha_org_admin']['id'],True,['requests'],['requirements.txt']
+    )
+    asyncio.run(Agent(wcfg,pg_worker,FakeGitHub(),FakeOSV()).process(job))
+    pg_operator.finish(job)
+    with pytest.raises(StaleJob):
+        with pg_worker.job_scope(job):
+            pg_worker.check_job(job)
+    with pg_operator.conn() as c:
+        assert c.execute('SELECT status FROM public.findings WHERE id=?',(findings['bravo'],)).fetchone()[0]=='open'
+        assert c.execute("SELECT COUNT(*) FROM public.advisories WHERE catalog_scope=?",('org:'+orgs['alpha'],)).fetchone()[0]==1

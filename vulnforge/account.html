@@ -19,7 +19,7 @@
 const byId=id=>document.getElementById(id),status=byId('status'),login=byId('login'),logout=byId('logout');
 let organizations=[],generation=0,connectionEnabled=false;
 const roles={org_admin:'Kuruluş yöneticisi',maintainer:'Proje sorumlusu',analyst:'Analist',viewer:'Görüntüleyici',auditor:'Denetçi'};
-const states={complete:'Tamamlandı (belirtilen kapsam)',incomplete:'Kısmi tarama',failed:'Tarama başarısız',running:'Tarama sürüyor',affected:'Etkileniyor',under_investigation:'İnceleniyor',not_affected:'Bu sürüm etkilenmiyor',withdrawn:'Duyuru geri çekildi',open:'Açık',resolved:'Çözüldü',suppressed:'Süreli risk kabulü'};
+const states={complete:'Tamamlandı (belirtilen kapsam)',incomplete:'Kısmi tarama',failed:'Tarama başarısız',running:'Tarama sürüyor',affected:'Etkileniyor',under_investigation:'İnceleniyor',not_affected:'Bu sürüm etkilenmiyor',withdrawn:'Duyuru geri çekildi',open:'Açık',resolved:'Çözüldü',false_positive:'Yanlış pozitif',risk_accepted:'Süreli risk kabulü',suppressed:'Süreli bastırma'};
 function empty(id,message){byId(id).replaceChildren(document.createTextNode(message));}
 function table(id,columns,rows){const host=byId(id);host.replaceChildren();if(!rows.length){host.textContent='Gösterilecek kayıt yok.';return;}
 const t=document.createElement('table'),head=t.createTHead().insertRow();for(const name of columns){const th=document.createElement('th');th.scope='col';th.textContent=name;head.append(th);}const body=t.createTBody();for(const values of rows){const row=body.insertRow();for(const value of values){const td=row.insertCell();td.textContent=value==null?'—':String(value);}}host.append(t);}

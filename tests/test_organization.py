@@ -241,3 +241,44 @@ def test_internal_scope_requires_a_current_membership(organizations):
     store,(members,orgs,_,_,_),_,_=organizations
     data=OrganizationData(store,orgs['bravo'],members['alpha_org_admin']['id'])
     with pytest.raises(ResourceNotFound): data.rows('findings')
+
+
+@pytest.mark.parametrize('role,status,expected',[
+    ('org_admin','false_positive',200),
+    ('maintainer','false_positive',200),
+    ('analyst','false_positive',200),
+    ('viewer','false_positive',403),
+    ('auditor','false_positive',403),
+    ('org_admin','risk_accepted',200),
+    ('maintainer','risk_accepted',200),
+    ('analyst','risk_accepted',403),
+    ('viewer','risk_accepted',403),
+    ('auditor','risk_accepted',403),
+])
+def test_false_positive_and_risk_accepted_are_bound_to_roles(organizations,role,status,expected):
+    client,headers,root=actor(organizations,role=role)
+    store,(_,orgs,_,_,findings),_,_=organizations
+    body={'status':status,'reason':'Reviewed role-bound triage decision'}
+    if status=='risk_accepted':
+        body['expires_at']=time.time()+7200
+    response=client.patch(root+f'/findings/{findings["alpha"]}/triage',json=body,headers=headers)
+    assert response.status_code==expected
+    if expected==200:
+        assert client.get(root+'/findings',params={'status':status}).json()['items'][0]['id']==findings['alpha']
+        # Rescanning the same finding preserves false_positive and active risk_accepted states.
+        store.save_finding('alpha/private-project','dep:alpha','dependency','high','Alpha finding','requirements.txt','b'*40,{})
+        assert client.get(root+'/findings',params={'status':status}).json()['items'][0]['id']==findings['alpha']
+
+
+def test_risk_accepted_requires_bounded_expiry_and_reopens_when_expired(organizations):
+    client,headers,root=actor(organizations,role='maintainer')
+    store,(_,_,_,_,findings),_,_=organizations
+    path=root+f'/findings/{findings["alpha"]}/triage'
+    assert client.patch(path,json={'status':'risk_accepted','reason':'Missing expiry'},headers=headers).status_code==422
+    assert client.patch(path,json={'status':'risk_accepted','reason':'Too long','expires_at':time.time()+400*86400},headers=headers).status_code==422
+    assert client.patch(path,json={'status':'false_positive','reason':'Has expiry','expires_at':time.time()+3600},headers=headers).status_code==422
+    assert client.patch(path,json={'status':'risk_accepted','reason':'Bounded risk acceptance','expires_at':time.time()+3600},headers=headers).status_code==200
+    with store.conn() as c:
+        c.execute('UPDATE suppressions SET expires_at=0 WHERE finding_id=?',(findings['alpha'],))
+    assert client.get(root+'/overview').json()['open_findings']==1
+    assert client.get(root+'/findings',params={'status':'open'}).json()['items'][0]['id']==findings['alpha']

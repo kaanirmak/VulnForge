@@ -19,7 +19,7 @@ ROOT='/api/v1/organizations'
 
 class CustomerTriage(BaseModel):
     model_config=ConfigDict(extra='forbid',strict=True,hide_input_in_errors=True)
-    status:Literal['open','resolved','suppressed']
+    status:Literal['open','resolved','false_positive','risk_accepted','suppressed']
     reason:str=Field(min_length=5,max_length=2000)
     expires_at:float|None=None
 
@@ -255,7 +255,7 @@ def install_organization_routes(app,cfg,store):
         return data.rows('remediations',repo,limit,cursor)
 
     @router.get('/findings')
-    async def findings(repo:str|None=None,status:Literal['open','resolved','suppressed']|None=None,
+    async def findings(repo:str|None=None,status:Literal['open','resolved','false_positive','risk_accepted','suppressed']|None=None,
                        severity:Literal['critical','high','medium','low','info']|None=None,
                        limit:int=Query(50,ge=1,le=100),cursor:int=Query(0,ge=0),data=Depends(scoped)):
         return data.rows('findings',repo,limit,cursor,status,severity)

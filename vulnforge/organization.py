@@ -74,7 +74,7 @@ class OrganizationData:
 
     def _expire_suppressions(self,c):
         sql,args=self.query('findings','x.id,x.repo')
-        rows=c.execute(sql+''' AND x.status='suppressed' AND EXISTS (SELECT 1 FROM suppressions s
+        rows=c.execute(sql+''' AND x.status IN ('suppressed','risk_accepted') AND EXISTS (SELECT 1 FROM suppressions s
             WHERE s.finding_id=x.id AND s.expires_at<=?)''',args+[time.time()]).fetchall()
         for row in rows:
             c.execute("UPDATE findings SET status='open' WHERE id=? AND repo=?",(row['id'],row['repo']))
@@ -146,13 +146,15 @@ class OrganizationData:
     def impacts(self,repo=None,advisory_id=None,state=None,cursor=0,limit=50):
         with self.access('impact.read') as c:
             self._repo(c,repo)
+            scope='org:'+self.organization_id
             sql,args=self.query('advisory_impacts')
-            sql+=' AND x.id>?';args.append(cursor)
+            sql+=" AND x.id>? AND EXISTS (SELECT 1 FROM advisories a WHERE a.id=x.advisory_id AND a.catalog_scope IN ('public',?))"
+            args.extend([cursor,scope])
             for column,value in (('repo',repo),('state',state)):
                 if value is not None: sql+=' AND x.'+column+'=?';args.append(value)
             if advisory_id is not None:
-                sql+=' AND EXISTS (SELECT 1 FROM advisory_aliases a WHERE a.advisory_id=x.advisory_id AND a.alias=?)'
-                args.append(advisory_id)
+                sql+=" AND EXISTS (SELECT 1 FROM advisory_aliases a WHERE a.advisory_id=x.advisory_id AND a.alias=? AND a.catalog_scope IN ('public',?))"
+                args.extend([advisory_id,scope])
             rows=c.execute(sql+' ORDER BY x.id LIMIT ?',args+[limit+1]).fetchall()
             items=self.decode(rows[:limit],('evidence','recommendations'))
             from .freshness import impact_view
@@ -163,25 +165,31 @@ class OrganizationData:
 
     def advisories(self,limit=50):
         with self.access('impact.read') as c:
+            scope='org:'+self.organization_id
             # Count only this org's projects, never reuse global advisory counters.
             rows=c.execute('''SELECT a.id,a.aliases,a.summary,a.source,a.withdrawn,a.first_seen_at,a.updated_at,
                 SUM(CASE WHEN i.state='affected' THEN 1 ELSE 0 END) AS affected_projects,
                 SUM(CASE WHEN i.state='under_investigation' THEN 1 ELSE 0 END) AS pending_projects
                 FROM advisories a JOIN advisory_impacts i ON i.advisory_id=a.id
                 JOIN repository_ownership o ON o.repo=i.repo WHERE o.organization_id=?
+                AND a.catalog_scope IN ('public',?)
                 AND EXISTS (SELECT 1 FROM memberships m WHERE m.organization_id=o.organization_id AND m.user_id=?)
                 GROUP BY a.id,a.aliases,a.summary,a.source,a.withdrawn,a.first_seen_at,a.updated_at
-                ORDER BY a.updated_at DESC,a.id LIMIT ?''',(self.organization_id,self.user_id,limit)).fetchall()
+                ORDER BY a.updated_at DESC,a.id LIMIT ?''',(self.organization_id,scope,self.user_id,limit)).fetchall()
             return self.decode(rows,('aliases',))
 
     def triage(self,finding_id,status,reason,expires_at=None):
-        if status not in ('open','resolved','suppressed'): raise ValueError('Invalid triage state')
+        if status not in ('open','resolved','false_positive','risk_accepted','suppressed'):
+            raise ValueError('Invalid triage state')
         if not isinstance(reason,str) or not 5<=len(reason)<=2000: raise ValueError('Triage reason required')
         safe_metadata(reason)
-        if status=='suppressed' and (type(expires_at) not in (int,float) or not time.time()<expires_at<=time.time()+366*86400):
-            raise ValueError('Suppression expiry must be within the next year')
-        if status!='suppressed' and expires_at is not None: raise ValueError('Expiry applies only to suppression')
-        with self.access('finding.suppress' if status=='suppressed' else 'finding.triage') as c:
+        timed=status in ('suppressed','risk_accepted')
+        if timed and (type(expires_at) not in (int,float) or not time.time()<expires_at<=time.time()+366*86400):
+            raise ValueError('Suppression or risk acceptance expiry must be within the next year')
+        if not timed and expires_at is not None:
+            raise ValueError('Expiry applies only to suppression or risk acceptance')
+        permission={'suppressed':'finding.suppress','risk_accepted':'finding.accept_risk'}.get(status,'finding.triage')
+        with self.access(permission) as c:
             sql,args=self.query('findings','x.id,x.repo')
             row=c.execute(sql+' AND x.id=?',args+[finding_id]).fetchone()
             if row is None: raise ResourceNotFound('Finding not found')

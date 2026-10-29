@@ -106,7 +106,11 @@ def impact_view(c,item,cache=None,now=None):
     freshness=copy.deepcopy(cache[item['repo']])
     if item.get('scan_id')!=freshness.get('scan_id'):
         freshness['reasons'].append('impact_snapshot_superseded');freshness['status']='needs_review'
-    advisory=c.execute('SELECT source_sha256,withdrawn FROM advisories WHERE id=?',(item['advisory_id'],)).fetchone()
+    advisory=c.execute("SELECT source_sha256,withdrawn,catalog_scope FROM advisories WHERE id=? AND catalog_scope!='quarantined_legacy'",(item['advisory_id'],)).fetchone()
+    if advisory is not None and advisory['catalog_scope']!='public':
+        owner=c.execute('SELECT organization_id FROM repository_ownership WHERE repo=?',(item['repo'],)).fetchone()
+        if owner is None or advisory['catalog_scope']!='org:'+owner['organization_id']:
+            advisory=None
     if advisory is None or item.get('evidence',{}).get('advisory_sha256')!=advisory['source_sha256']:
         freshness['reasons'].append('advisory_revision_unverified');freshness['status']='needs_review'
     if item.get('evidence',{}).get('stale') or not item.get('evidence',{}).get('coverage_complete'):

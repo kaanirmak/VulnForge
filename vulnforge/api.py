@@ -17,7 +17,7 @@ import time
 
 
 class TriageRequest(BaseModel):
-    status: Literal['open', 'resolved', 'suppressed']
+    status: Literal['open', 'resolved', 'false_positive', 'risk_accepted', 'suppressed']
     reason: str = Field(min_length=5, max_length=2000)
     expires_at: float | None = None
 
@@ -297,7 +297,7 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
         return store.list_rows('findings',repo=repo)
 
     @app.get('/api/v1/findings',dependencies=[Depends(admin)])
-    async def filtered_findings(repo: str | None=None, status: Literal['open','resolved','suppressed'] | None=None,
+    async def filtered_findings(repo: str | None=None, status: Literal['open','resolved','false_positive','risk_accepted','suppressed'] | None=None,
                                 severity: Literal['critical','high','medium','low','info'] | None=None,
                                 cursor: int=Query(0,ge=0), limit: int=Query(50,ge=1,le=100)):
         store.expire_suppressions()
@@ -365,8 +365,11 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
 
     @app.patch('/api/v1/findings/{finding_id}/triage',dependencies=[Depends(admin)])
     async def triage_finding(finding_id: int, change: TriageRequest):
-        if change.status=='suppressed' and (change.expires_at is None or not time.time()<change.expires_at<=time.time()+366*86400):
+        timed=change.status in ('suppressed','risk_accepted')
+        if timed and (change.expires_at is None or not time.time()<change.expires_at<=time.time()+366*86400):
             raise HTTPException(422,'Suppression requires expiry within the next year')
+        if not timed and change.expires_at is not None:
+            raise HTTPException(422,'Expiry applies only to suppression or risk acceptance')
         result=store.triage(finding_id,change.status,change.reason,change.expires_at)
         if result is None: raise HTTPException(404,'Finding not found')
         return result

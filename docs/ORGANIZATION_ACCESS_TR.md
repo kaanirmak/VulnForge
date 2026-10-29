@@ -10,8 +10,9 @@ VF-017 güncellemesi: PostgreSQL önizlemesinde ayrı non-owner operator/custome
 |---|---|---|---|---|---|
 | Proje, dependency, finding, scan, impact/öneri görüntüleme | Evet | Evet | Evet | Evet | Evet |
 | Kendi organizasyonunun SBOM/SARIF çıktısı | Evet | Evet | Evet | Evet | Evet |
-| Bulguyu open/resolved olarak değerlendirme | Evet | Evet | Evet | Hayır | Hayır |
-| Süreli suppression / risk kabulü | Evet | Evet | Hayır | Hayır | Hayır |
+| Bulguyu `open` / `resolved` / `false_positive` (`finding.triage`) olarak değerlendirme | Evet | Evet | Evet | Hayır | Hayır |
+| Süreli `risk_accepted` (`finding.accept_risk`, zorunlu <= 366 gün süre sonu) | Evet | Evet | Hayır | Hayır | Hayır |
+| Süreli `suppressed` (`finding.suppress`, zorunlu <= 366 gün süre sonu) | Evet | Evet | Hayır | Hayır | Hayır |
 | Organizasyon audit görüntüleme | Evet | Hayır | Hayır | Hayır | Evet |
 | Üyelik/sahiplik değiştirme | Yalnız güvenilen iç servis metotları | Hayır | Hayır | Hayır | Hayır |
 
