@@ -1,8 +1,8 @@
 # Toplu uygulama durumu — 29 Ekim 2026
 
-İşler tek tek kullanıcı onayı beklenmeden bağlantılı gruplar halinde ilerletildi. **110 görevin tamamı bitmedi: 32 tamamlandı, 78 açık.** Kısmi kod veya mock test, canlı kabul ve bağımsız inceleme yerine tamamlanmış sayılmadı.
+İşler tek tek kullanıcı onayı beklenmeden bağlantılı gruplar halinde ilerletildi. **110 görevin tamamı bitmedi: 33 tamamlandı, 77 açık.** Kısmi kod veya mock test, canlı kabul ve bağımsız inceleme yerine tamamlanmış sayılmadı.
 
-Önceki toplu grupta kapatılanlar: **VF-018, VF-020, VF-021, VF-026, VF-029, VF-030, VF-031, VF-037, VF-038, VF-040, VF-043, VF-044, VF-054, VF-061, VF-062, VF-075, VF-086**. Ayrıntılı tamamlanma kanıtları [ana listede](TASKS_TR.md).
+Önceki toplu grupta kapatılanlar: **VF-018, VF-020, VF-021, VF-026, VF-029, VF-030, VF-031, VF-037, VF-038, VF-040, VF-043, VF-044, VF-052, VF-054, VF-061, VF-062, VF-075, VF-086**. Ayrıntılı tamamlanma kanıtları [ana listede](TASKS_TR.md).
 
 27 Ekim grubunda **VF-037/038** kapatıldı: gerçek RSA/JWKS doğrulama kodu, metadata-only installation/repo kontrolü, connection-bound runner policy, canonical receipt/dedup/replay bariyeri, explicit-consent uploader ve reusable workflow yayın şablonu eklendi. 119 yeni testle toplam 522 test geçti. VF-035/036 canlı provider/installation kabulü ve baseline promotion açık; [protokol ve sınırlar](RUNNER_IDENTITY_TR.md).
 
@@ -50,8 +50,9 @@ VF-018, VF-062 ve VF-075 tamamlandı:
 - **VF-030**: İlk dal (`before=0000...`), silinen dal (`deleted`/`after=0000...`), force-push (`forced=true` / `diverged`), büyük push ve kaçırılan webhook teslimatı (`last_sha != before`) için `reconcile_push`/`backfill_commits`, kanıt invalidation ve `push_reconciled` audit akışı eklendi.
 - **VF-043**: `scanner.py` içinde `normalize_finding`, `compute_fingerprint`, `runner_fingerprint` ve `to_runner_finding` ile `code`, `dependency` ve `coverage` bulguları ortak şemaya (`schema_version=1`), deterministik SHA-256 fingerprint'e ve `path_id` pseudonym'e bağlandı.
 - **VF-044**: PR `base_sha`/`head_sha` karşılaştırması ile hem kod bulgularında (satır kaymasına dayanıklı `_line_sig` eşlemesi) hem bağımlılık bulgularında (`base_packages` farkı) `new` ve `pre_existing` ayrımı yapıldı; GitHub Check sonuçları ve annotation seviyeleri buna göre ayrıştırıldı.
+- **VF-052**: GHSA ve OSV arasında çapraz alias (`CVE-*`, `PYSEC-*`, `GHSA-*`) birleştirme, `identifiers` desteği, `_revisions`/`revision_count` geçmişi ve `withdrawn` / yeniden etkinleştirme uzlaştırması tamamlandı.
 - **VF-062**: `remediation.py` içinde `build_patch_plan` / `build_patch_plans` ile paket, mevcut/hedef sürüm, `major`/`minor`/`patch` sınıfı, 40-hex baseline SHA, manifest SHA-256, izinli dosya allowlist'i ve zorunlu kontrolleri içeren deterministik patch planı üretimi eklendi; `publication_allowed=False` ve `automerge_allowed=False` korundu.
 - **VF-075**: `false_positive` (`finding.triage`: Org Admin, Maintainer, Analyst), `risk_accepted` (`finding.accept_risk`: Org Admin, Maintainer; <= 366 gün süre sonu zorunlu) ve `suppressed` (`finding.suppress`) işlemleri hem uygulama hem PostgreSQL RLS politikalarında rollere bağlandı.
-- Doğrulama: SQLite + geçici gerçek PostgreSQL 14.23 üzerinde **663 test geçti, skip yok**.
+- Doğrulama: SQLite + geçici gerçek PostgreSQL 14.23 üzerinde **664 test geçti, skip yok**.
 
 Tam ürün hedefi [README](../README.md) ve [mimari](../ARCHITECTURE.md) içindedir. Kullanıcının şimdiki hazırlığı [GitHub App rehberi](USER_NEXT_STEPS_TR.md) ile sınırlıdır; açık kod görevleri kullanıcıya devredilmez.

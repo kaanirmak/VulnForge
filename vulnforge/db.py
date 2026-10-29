@@ -415,19 +415,59 @@ class Store:
         if scope.startswith('org:') and source=='OSV':
             source='Private OSV'
         raw_canonical=advisory_identity(advisory)
-        canonical=self._scoped_advisory_id(raw_canonical,scope)
-        aliases=sorted({raw_canonical,advisory['id'],*advisory.get('aliases',[])})
-        encoded=json.dumps(advisory,sort_keys=True)
+        aliases=sorted({str(x) for x in (raw_canonical,advisory['id'],*advisory.get('aliases',[])) if isinstance(x,str) and x})
+        clean_payload={k:v for k,v in advisory.items() if not str(k).startswith('_')}
+        source_sha256=hashlib.sha256(json.dumps(clean_payload,sort_keys=True).encode()).hexdigest()
         now=time.time()
         with self.transaction(), self.conn() as c:
+            placeholders=','.join('?' for _ in aliases)
+            linked_rows=c.execute(
+                f'SELECT DISTINCT advisory_id FROM advisory_aliases WHERE catalog_scope=? AND alias IN ({placeholders})',
+                (scope,*aliases)).fetchall() if aliases else []
+            linked_ids=[r['advisory_id'] for r in linked_rows]
+            if not raw_canonical.startswith('GHSA-') and linked_ids:
+                ghsa_links=sorted(x for x in linked_ids if x.split(':',1)[-1].startswith('GHSA-'))
+                canonical=ghsa_links[0] if ghsa_links else sorted(linked_ids)[0]
+                raw_canonical=canonical.split(':',1)[-1] if scope!='public' and canonical.startswith(scope+':') else canonical
+            else:
+                canonical=self._scoped_advisory_id(raw_canonical,scope)
+            aliases=sorted(set(aliases)|{raw_canonical})
             previous=c.execute('SELECT * FROM advisories WHERE id=? AND catalog_scope=?',(canonical,scope)).fetchone()
+            revisions=[]
+            for lid in linked_ids:
+                if lid==canonical or lid.split(':',1)[-1].startswith('GHSA-'): continue
+                lrow=c.execute('SELECT * FROM advisories WHERE id=? AND catalog_scope=?',(lid,scope)).fetchone()
+                if lrow is None: continue
+                aliases=sorted(set(aliases)|set(json.loads(lrow['aliases'])))
+                ldata=json.loads(lrow['data'])
+                lrevs=ldata.get('_revisions') or [{
+                    'revision':1,'source':lrow['source'],'source_sha256':lrow['source_sha256'],
+                    'modified':ldata.get('modified'),'withdrawn':bool(lrow['withdrawn']),
+                    'aliases':json.loads(lrow['aliases']),'observed_at':lrow['updated_at']}]
+                revisions.extend(lrevs)
+                if previous is None:
+                    previous=lrow
+                if self._job.get() is None:
+                    for impact in c.execute('SELECT * FROM advisory_impacts WHERE advisory_id=?',(lid,)).fetchall():
+                        c.execute('''INSERT INTO advisory_impacts(repo,advisory_id,state,scan_id,evidence,recommendations,updated_at)
+                            VALUES(?,?,?,?,?,?,?) ON CONFLICT(repo,advisory_id) DO NOTHING''',
+                            (impact['repo'],canonical,impact['state'],impact['scan_id'],impact['evidence'],impact['recommendations'],impact['updated_at']))
+                    c.execute('DELETE FROM advisory_impacts WHERE advisory_id=?',(lid,))
             withdrawn=bool(advisory.get('withdrawn'))
             if previous:
                 aliases=sorted(set(aliases)|set(json.loads(previous['aliases'])))
+                prev_data=json.loads(previous['data'])
+                prev_revs=prev_data.get('_revisions') or [{
+                    'revision':1,'source':previous['source'],'source_sha256':previous['source_sha256'],
+                    'modified':prev_data.get('modified'),'withdrawn':bool(previous['withdrawn']),
+                    'aliases':json.loads(previous['aliases']),'observed_at':previous['updated_at']}]
+                for r in prev_revs:
+                    if not any(x.get('source_sha256')==r.get('source_sha256') and x.get('source')==r.get('source') for x in revisions):
+                        revisions.append(r)
                 def timestamp(value):
                     try: return datetime.fromisoformat(value.replace('Z','+00:00')).timestamp()
                     except (AttributeError,TypeError,ValueError): return 0
-                old=timestamp(json.loads(previous['data']).get('modified'))
+                old=timestamp(prev_data.get('modified'))
                 new=timestamp(advisory.get('modified'))
                 stale=(old and new and new<old)
                 # Source lag must not resurrect withdrawals or erase newer
@@ -436,28 +476,48 @@ class Store:
                          (source=='GitHub webhook' and old and new>old))
                 preserve=previous['source']=='GitHub webhook' and source=='OSV' and new<=old
                 if stale or blocked or preserve:
-                    c.execute('UPDATE advisories SET aliases=? WHERE id=? AND catalog_scope=?',(json.dumps(aliases),canonical,scope))
+                    if not any(x.get('source_sha256')==source_sha256 and x.get('source')==source for x in revisions):
+                        revisions.append({
+                            'revision':len(revisions)+1,'source':source,'source_sha256':source_sha256,
+                            'modified':advisory.get('modified'),'withdrawn':withdrawn,
+                            'aliases':aliases,'observed_at':now,'superseded':True})
+                    prev_data['_revisions']=revisions[-50:]
+                    c.execute('UPDATE advisories SET aliases=?,data=? WHERE id=? AND catalog_scope=?',
+                              (json.dumps(aliases),json.dumps(prev_data,sort_keys=True),canonical,scope))
                     for alias in aliases:
-                        c.execute('INSERT INTO advisory_aliases(alias,advisory_id,catalog_scope) VALUES(?,?,?) ON CONFLICT DO NOTHING',(alias,canonical,scope))
+                        c.execute('INSERT INTO advisory_aliases(alias,advisory_id,catalog_scope) VALUES(?,?,?) ON CONFLICT DO NOTHING',
+                                  (alias,canonical,scope))
                     return canonical
+            if not any(x.get('source_sha256')==source_sha256 and x.get('source')==source and x.get('withdrawn')==withdrawn for x in revisions):
+                revisions.append({
+                    'revision':len(revisions)+1,'source':source,'source_sha256':source_sha256,
+                    'modified':advisory.get('modified'),'withdrawn':withdrawn,
+                    'aliases':aliases,'observed_at':now,'superseded':False})
+            stored_payload={**clean_payload,'_revisions':revisions[-50:]}
+            encoded=json.dumps(stored_payload,sort_keys=True)
             c.execute('''INSERT INTO advisories(id,aliases,summary,source,data,source_sha256,withdrawn,first_seen_at,updated_at,catalog_scope)
                 VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET
                 aliases=excluded.aliases,summary=excluded.summary,source=excluded.source,data=excluded.data,
                 source_sha256=excluded.source_sha256,withdrawn=excluded.withdrawn,updated_at=excluded.updated_at
                 WHERE advisories.catalog_scope=excluded.catalog_scope''',
                 (canonical,json.dumps(aliases),str(advisory.get('summary',''))[:1000],source,encoded,
-                 hashlib.sha256(encoded.encode()).hexdigest(),int(withdrawn),now,now,scope))
+                 source_sha256,int(withdrawn),now,now,scope))
             for alias in aliases:
-                c.execute('INSERT INTO advisory_aliases(alias,advisory_id,catalog_scope) VALUES(?,?,?) ON CONFLICT DO NOTHING',(alias,canonical,scope))
+                c.execute('INSERT INTO advisory_aliases(alias,advisory_id,catalog_scope) VALUES(?,?,?) ON CONFLICT DO NOTHING',
+                          (alias,canonical,scope))
             if withdrawn:
                 job_scope=self._job.get()
                 suffix=' AND repo=?' if job_scope else ''
                 params=(job_scope['repo'],) if job_scope else ()
-                c.execute("UPDATE advisory_impacts SET state='withdrawn',recommendations='[]',updated_at=? WHERE advisory_id=?"+suffix,(now,canonical,*params))
+                match_ids={canonical,raw_canonical,*aliases,*linked_ids}
+                id_placeholders=','.join('?' for _ in match_ids)
+                c.execute(f"UPDATE advisory_impacts SET state='withdrawn',recommendations='[]',updated_at=? WHERE advisory_id IN ({id_placeholders})"+suffix,
+                          (now,*match_ids,*params))
                 findings=c.execute("SELECT id,repo,details FROM findings WHERE category='dependency' AND status!='resolved'"+suffix,params).fetchall()
                 for finding in findings:
                     details=json.loads(finding['details'])
-                    if details.get('advisory_id',details.get('osv_id')) not in (canonical,raw_canonical): continue
+                    finding_ids={details.get('advisory_id'),details.get('osv_id'),*(details.get('aliases') or [])}
+                    if not (finding_ids & match_ids): continue
                     c.execute("UPDATE findings SET status='resolved' WHERE id=?",(finding['id'],))
                     self.audit_event(finding['repo'],finding['id'],'intelligence','advisory_withdrawn',{'advisory_id':canonical})
             return canonical
@@ -465,11 +525,22 @@ class Store:
     def advisory(self, id_, *, catalog_scope=None):
         scope=self._catalog_scope(catalog_scope)
         scoped_id=self._scoped_advisory_id(id_,scope)
+        is_ghsa=str(id_).split(':',1)[-1].startswith('GHSA-')
         with self.conn() as c:
-            row=c.execute('SELECT * FROM advisories WHERE id=? AND catalog_scope=?',(scoped_id,scope)).fetchone()
+            row=c.execute('SELECT * FROM advisories WHERE id=? AND catalog_scope=?',(scoped_id,scope)).fetchone() if is_ghsa else None
+            if row is None:
+                row=c.execute('''SELECT a.* FROM advisories a
+                    JOIN advisory_aliases x ON x.advisory_id=a.id AND x.catalog_scope=a.catalog_scope
+                    WHERE x.alias IN (?,?) AND a.catalog_scope=?
+                    ORDER BY CASE WHEN a.id LIKE 'GHSA-%' OR a.id LIKE '%:GHSA-%' THEN 0 ELSE 1 END, a.updated_at DESC
+                    LIMIT 1''',(id_,scoped_id,scope)).fetchone()
+            if row is None and not is_ghsa:
+                row=c.execute('SELECT * FROM advisories WHERE id=? AND catalog_scope=?',(scoped_id,scope)).fetchone()
             if row is None: return None
             result=dict(row)
             for field in ('aliases','data'): result[field]=json.loads(result[field])
+            result['revisions']=list(result['data'].get('_revisions',[]))
+            result['revision_count']=len(result['revisions'])
             return result
 
     def save_impact(self, repo, advisory_id, state, scan_id, evidence, recommendations):
@@ -552,12 +623,15 @@ class Store:
     def list_advisories(self, limit=50, organization_id=None):
         scope='org:'+organization_id if organization_id else 'public'
         with self.conn() as c:
-            rows=c.execute('''SELECT a.id,a.aliases,a.summary,a.source,a.withdrawn,a.first_seen_at,a.updated_at,
+            rows=c.execute('''SELECT a.id,a.aliases,a.summary,a.source,a.source_sha256,a.data,a.withdrawn,a.first_seen_at,a.updated_at,
                 (SELECT COUNT(*) FROM advisory_impacts i WHERE i.advisory_id=a.id AND i.state='affected') AS affected_projects,
                 (SELECT COUNT(*) FROM advisory_impacts i WHERE i.advisory_id=a.id AND i.state='under_investigation') AS pending_projects
                 FROM advisories a WHERE a.catalog_scope=? ORDER BY a.updated_at DESC LIMIT ?''',(scope,limit)).fetchall()
         items=[dict(row) for row in rows]
-        for item in items: item['aliases']=json.loads(item['aliases'])
+        for item in items:
+            item['aliases']=json.loads(item['aliases'])
+            data=json.loads(item.pop('data','{}'))
+            item['revision_count']=len(data.get('_revisions',[])) or 1
         return items
 
     def save_remediation(self, repo: str, key: str, url: str):

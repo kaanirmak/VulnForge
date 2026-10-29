@@ -174,8 +174,12 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
             vulnerabilities=incoming.get('vulnerabilities',[])
             advisory_id=incoming.get('ghsa_id')
             if isinstance(advisory_id,str) and advisory_id and len(advisory_id)<=256:
+                extra_aliases=[incoming['cve_id']] if isinstance(incoming.get('cve_id'),str) and incoming.get('cve_id') else []
+                for ident in incoming.get('identifiers',[]) if isinstance(incoming.get('identifiers'),list) else []:
+                    if isinstance(ident,dict) and isinstance(ident.get('value'),str) and ident['value']:
+                        extra_aliases.append(ident['value'])
                 advisory_id=store.save_advisory({
-                    'id':advisory_id,'aliases':[incoming['cve_id']] if incoming.get('cve_id') else [],
+                    'id':advisory_id,'aliases':sorted(set(extra_aliases)),
                     'summary':incoming.get('summary',''),'modified':incoming.get('updated_at'),
                     'published':incoming.get('published_at'),'vulnerabilities':vulnerabilities,
                     'withdrawn':incoming.get('withdrawn_at') or (str(time.time()) if data['action']=='withdrawn' else None)

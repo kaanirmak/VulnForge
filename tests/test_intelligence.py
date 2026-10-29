@@ -298,3 +298,73 @@ def test_candidate_queries_are_batched_and_duplicate_manifest_targets_coalesced(
         assert output[deps[2]]['recommended_version'] is None
     asyncio.run(run())
     assert len(calls)==1 and len(calls[0])==2
+
+
+def test_ghsa_and_osv_cross_alias_linking_and_revision_history(tmp_path):
+    client,store=setup(tmp_path)
+    store.upsert_repo('o/r',1,'main')
+    # 1. OSV advisory arrives first under PYSEC ID with a CVE alias (no GHSA yet)
+    first_id=store.save_advisory({
+        'id':'PYSEC-2026-42',
+        'aliases':['CVE-2026-4242'],
+        'summary':'Initial PYSEC report',
+        'modified':'2026-01-10T00:00:00Z',
+    },source='OSV')
+    assert first_id=='PYSEC-2026-42'
+    store.save_impact('o/r',first_id,'affected',None,{'advisory_sha256':store.advisory(first_id)['source_sha256']},[])
+    store.save_finding('o/r','dep:pysec42','dependency','high','requests affected','requirements.txt','a'*40,
+                       {'advisory_id':'PYSEC-2026-42','osv_id':'PYSEC-2026-42','aliases':['CVE-2026-4242']})
+
+    # 2. Signed GitHub security_advisory webhook arrives with GHSA ID and the same CVE in identifiers
+    webhook_payload=json.dumps({
+        'action':'updated',
+        'security_advisory':{
+            'ghsa_id':'GHSA-4242-xxxx-yyyy',
+            'cve_id':None,
+            'identifiers':[{'type':'GHSA','value':'GHSA-4242-xxxx-yyyy'},{'type':'CVE','value':'CVE-2026-4242'}],
+            'summary':'Updated GHSA range',
+            'updated_at':'2026-02-01T00:00:00Z',
+            'vulnerabilities':[{'package':{'ecosystem':'pip','name':'requests'},'vulnerable_version_range':'< 2.31.0'}],
+        }
+    }).encode()
+    res=client.post('/github/webhook',content=webhook_payload,headers=signed('security_advisory',webhook_payload))
+    assert res.status_code==202
+
+    # Both aliases resolve to the canonical GHSA record and preserve revision history
+    by_ghsa=store.advisory('GHSA-4242-xxxx-yyyy')
+    by_cve=store.advisory('CVE-2026-4242')
+    by_pysec=store.advisory('PYSEC-2026-42')
+    assert by_ghsa is not None and by_cve['id']=='GHSA-4242-xxxx-yyyy' and by_pysec['id']=='GHSA-4242-xxxx-yyyy'
+    assert set(by_ghsa['aliases'])>={'GHSA-4242-xxxx-yyyy','CVE-2026-4242','PYSEC-2026-42'}
+    assert by_ghsa['revision_count']==2
+    assert [r['source'] for r in by_ghsa['revisions']]==['OSV','GitHub webhook']
+
+    # 3. Subsequent OSV record without GHSA in its payload still resolves to GHSA-4242-xxxx-yyyy via CVE alias
+    merged_id=store.save_advisory({
+        'id':'PYSEC-2026-42',
+        'aliases':['CVE-2026-4242'],
+        'summary':'Lagging OSV sync',
+        'modified':'2026-01-15T00:00:00Z',
+    },source='OSV')
+    assert merged_id=='GHSA-4242-xxxx-yyyy'
+    after_lag=store.advisory('GHSA-4242-xxxx-yyyy')
+    assert after_lag['summary']=='Updated GHSA range'
+    assert after_lag['revision_count']==3
+    assert after_lag['revisions'][-1]['superseded'] is True
+
+    # 4. Withdrawing GHSA also withdraws linked PYSEC finding and impact
+    withdrawn_payload=json.dumps({
+        'action':'withdrawn',
+        'security_advisory':{
+            'ghsa_id':'GHSA-4242-xxxx-yyyy',
+            'cve_id':'CVE-2026-4242',
+            'summary':'Withdrawn advisory',
+            'updated_at':'2026-03-01T00:00:00Z',
+            'withdrawn_at':'2026-03-01T00:00:00Z',
+            'vulnerabilities':[],
+        }
+    }).encode()
+    client.post('/github/webhook',content=withdrawn_payload,headers=signed('security_advisory',withdrawn_payload))
+    assert store.advisory('CVE-2026-4242')['withdrawn']==1
+    assert store.list_rows('findings')[0]['status']=='resolved'
+    assert all(i['state']=='withdrawn' for i in store.list_impacts(advisory_id='CVE-2026-4242')['items'])
