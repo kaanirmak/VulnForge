@@ -14,7 +14,7 @@ import time
 from .dependencies import inventory_manifest
 from .privacy import path_id
 from .runner_report import RunnerReport,ReportDependency,parse_report
-from .scanner import scan_code
+from .scanner import scan_code,to_runner_finding
 
 MANIFESTS=frozenset(('requirements.txt','package-lock.json','poetry.lock','Cargo.lock','composer.lock','go.mod'))
 CODE_SUFFIXES=('.py','.js','.jsx','.ts','.tsx','.env','.json','.yaml','.yml','.toml')
@@ -97,10 +97,7 @@ def scan(root,repo,sha,kind='code'):
                             try: ast.parse(text)
                             except (SyntaxError,ValueError,RecursionError): reason('parse_error')
                         for finding in scan_code(relative,text):
-                            rule=finding['details']['rule'];line=finding['details']['line']
-                            findings.append({'rule_id':rule,'severity':finding['severity'],
-                                'path_id':pseudonym,'line':line,
-                                'fingerprint':hashlib.sha256(f'{pseudonym}:{line}:{rule}'.encode()).hexdigest()})
+                            findings.append(to_runner_finding(finding,path_pseudonym=pseudonym))
                             if len(findings)>5000: raise ScanLimit('Finding limit')
                     else:
                         if len(manifests)>=80: raise ScanLimit('Manifest limit')

@@ -1,7 +1,24 @@
-"""Small, transparent static rule set. Not a substitute for Semgrep/CodeQL."""
+"""Small, transparent static rule set and canonical finding/fingerprint normalizer."""
 import ast
 import hashlib
 import re
+
+FINDING_SCHEMA_VERSION = '1'
+
+SEVERITY_MAP = {
+    'critical': 'critical',
+    'high': 'high',
+    'error': 'high',
+    'medium': 'medium',
+    'warning': 'medium',
+    'warn': 'medium',
+    'low': 'low',
+    'info': 'info',
+    'note': 'info',
+}
+
+VALID_CATEGORIES = frozenset(('code', 'dependency', 'coverage'))
+VALID_SCANNERS = frozenset(('builtin', 'semgrep', 'gitleaks', 'osv', 'coverage'))
 
 # Never store values that match a secret rule in evidence.
 SECRETS = [
@@ -12,11 +29,136 @@ SECRETS = [
 ]
 
 
-def finding(path: str, line: int, rule: str, title: str, severity: str, snippet: str):
-    fingerprint = hashlib.sha256(f'{path}:{line}:{rule}'.encode()).hexdigest()[:24]
-    return {'key': f'code:{fingerprint}', 'category':'code', 'severity':severity,
-            'title':title, 'file_path':path,
-            'details':{'rule':rule, 'line':line, 'evidence':snippet[:140]}}
+def normalize_severity(severity: str) -> str:
+    if not isinstance(severity, str):
+        raise ValueError('Severity must be a string')
+    mapped = SEVERITY_MAP.get(severity.strip().lower())
+    if mapped is None:
+        raise ValueError(f'Unsupported finding severity: {severity}')
+    return mapped
+
+
+def redact_evidence(rule: str | None, snippet: str) -> str:
+    if not isinstance(snippet, str):
+        return ''
+    if rule in ('hardcoded-secret', 'gitleaks-secret') or any(rx.search(snippet) for _, rx in SECRETS):
+        return '[REDACTED: possible secret]'
+    return snippet[:140]
+
+
+def runner_fingerprint(path_pseudonym: str, line: int, rule_id: str) -> str:
+    if not isinstance(path_pseudonym, str) or not path_pseudonym.startswith('sha256:'):
+        raise ValueError('Runner fingerprint requires a sha256 path pseudonym')
+    if type(line) is not int or line < 1:
+        raise ValueError('Runner fingerprint requires a positive integer line number')
+    if not isinstance(rule_id, str) or not rule_id:
+        raise ValueError('Runner fingerprint requires a non-empty rule_id')
+    return hashlib.sha256(f'{path_pseudonym}:{line}:{rule_id}'.encode()).hexdigest()
+
+
+def compute_fingerprint(category: str, *, file_path: str | None = None,
+                        line: int | None = None, rule: str | None = None,
+                        ecosystem: str | None = None, package: str | None = None,
+                        version: str | None = None, advisory_id: str | None = None,
+                        sha: str | None = None) -> tuple[str, str]:
+    if category == 'code':
+        if not file_path or type(line) is not int or line < 1 or not rule:
+            raise ValueError('Code finding fingerprint requires file_path, positive line, and rule')
+        digest = hashlib.sha256(f'{file_path}:{line}:{rule}'.encode()).hexdigest()
+        return f'code:{digest[:24]}', digest
+    if category == 'dependency':
+        if not file_path or not ecosystem or not package or not version or not advisory_id:
+            raise ValueError('Dependency finding fingerprint requires file_path, ecosystem, package, version, and advisory_id')
+        digest = hashlib.sha256(f'{file_path}:{ecosystem}:{package}:{version}:{advisory_id}'.encode()).hexdigest()
+        return f'dep:{digest[:32]}', digest
+    if category == 'coverage':
+        if not sha or file_path is None:
+            raise ValueError('Coverage finding fingerprint requires sha and file_path')
+        digest = hashlib.sha256(f'{sha}:{file_path}'.encode()).hexdigest()
+        return f'coverage:{digest[:24]}', digest
+    raise ValueError(f'Unsupported finding category: {category}')
+
+
+def normalize_finding(*, category: str, severity: str, title: str,
+                      file_path: str | None = None, line: int | None = None,
+                      rule: str | None = None, snippet: str = '',
+                      scanner: str = 'builtin', details: dict | None = None,
+                      ecosystem: str | None = None, package: str | None = None,
+                      version: str | None = None, advisory_id: str | None = None,
+                      sha: str | None = None) -> dict:
+    if category not in VALID_CATEGORIES:
+        raise ValueError(f'Unsupported finding category: {category}')
+    if scanner not in VALID_SCANNERS:
+        raise ValueError(f'Unsupported scanner source: {scanner}')
+    norm_severity = normalize_severity(severity)
+    if not isinstance(title, str) or not title.strip():
+        raise ValueError('Finding title is required')
+    safe_title = redact_evidence(rule, title.strip()) if any(rx.search(title) for _, rx in SECRETS) else title.strip()[:500]
+    key, fingerprint = compute_fingerprint(
+        category, file_path=file_path, line=line, rule=rule,
+        ecosystem=ecosystem, package=package, version=version,
+        advisory_id=advisory_id, sha=sha)
+    pseudonym = None
+    if isinstance(file_path, str) and file_path:
+        try:
+            from .privacy import path_id
+            pseudonym = path_id(file_path)
+        except ValueError:
+            pseudonym = None
+    merged_details = dict(details or {})
+    merged_details['schema_version'] = FINDING_SCHEMA_VERSION
+    merged_details['scanner'] = scanner
+    merged_details['fingerprint'] = fingerprint
+    if pseudonym is not None:
+        merged_details['path_id'] = pseudonym
+    if category == 'code':
+        merged_details['rule'] = rule
+        merged_details['rule_id'] = rule
+        merged_details['line'] = line
+        merged_details['evidence'] = redact_evidence(rule, snippet)
+        if pseudonym is not None:
+            merged_details['runner_fingerprint'] = runner_fingerprint(pseudonym, line, rule)
+    return {
+        'schema_version': FINDING_SCHEMA_VERSION,
+        'key': key,
+        'fingerprint': fingerprint,
+        'category': category,
+        'scanner': scanner,
+        'severity': norm_severity,
+        'title': safe_title,
+        'file_path': file_path,
+        'details': merged_details,
+    }
+
+
+def to_runner_finding(normalized: dict, *, path_pseudonym: str | None = None) -> dict:
+    from .privacy import path_id
+    if normalized.get('category') != 'code':
+        raise ValueError('Only code findings convert to runner code findings')
+    details = normalized.get('details') or {}
+    rule = details.get('rule_id') or details.get('rule')
+    line = details.get('line')
+    pseudonym = path_pseudonym or details.get('path_id') or path_id(normalized['file_path'])
+    return {
+        'rule_id': rule,
+        'severity': normalize_severity(normalized['severity']),
+        'path_id': pseudonym,
+        'line': line,
+        'fingerprint': runner_fingerprint(pseudonym, line, rule),
+    }
+
+
+def finding(path: str, line: int, rule: str, title: str, severity: str, snippet: str, *, scanner: str = 'builtin'):
+    return normalize_finding(
+        category='code',
+        severity=severity,
+        title=title,
+        file_path=path,
+        line=line,
+        rule=rule,
+        snippet=snippet,
+        scanner=scanner,
+    )
 
 
 def scan_code(path: str, source: str):

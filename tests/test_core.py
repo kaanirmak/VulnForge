@@ -1,4 +1,12 @@
-from vulnforge.scanner import scan_code
+from vulnforge.scanner import (
+    FINDING_SCHEMA_VERSION,
+    compute_fingerprint,
+    normalize_finding,
+    normalize_severity,
+    runner_fingerprint,
+    scan_code,
+    to_runner_finding,
+)
 from vulnforge.dependencies import parse_manifest, Dependency
 from vulnforge.remediation import patched_requirement, candidate_version, branch_for
 from vulnforge.db import Store
@@ -10,6 +18,63 @@ def test_scanner_keeps_secret_out_of_evidence():
     assert len(results)==2
     assert all(secret not in str(item) for item in results)
     assert results[0]['details']['evidence'].startswith('[REDACTED')
+    assert results[0]['schema_version']==FINDING_SCHEMA_VERSION
+    assert results[0]['details']['schema_version']==FINDING_SCHEMA_VERSION
+    assert len(results[0]['fingerprint'])==64
+
+
+def test_finding_normalization_and_common_fingerprint_schema():
+    import pytest
+    assert normalize_severity('ERROR')=='high'
+    assert normalize_severity('warning')=='medium'
+    assert normalize_severity('note')=='info'
+    with pytest.raises(ValueError):
+        normalize_severity('unknown')
+
+    code_item=normalize_finding(
+        category='code',
+        severity='ERROR',
+        title='Semgrep rule match',
+        file_path='src/app.py',
+        line=42,
+        rule='dynamic-execution',
+        snippet='eval(x)',
+        scanner='semgrep',
+    )
+    assert code_item['severity']=='high'
+    assert code_item['scanner']=='semgrep'
+    assert code_item['key'].startswith('code:')
+    assert code_item['details']['path_id'].startswith('sha256:')
+    runner_item=to_runner_finding(code_item)
+    assert runner_item['rule_id']=='dynamic-execution'
+    assert runner_item['line']==42
+    assert runner_item['fingerprint']==runner_fingerprint(code_item['details']['path_id'],42,'dynamic-execution')
+
+    dep_item=normalize_finding(
+        category='dependency',
+        severity='high',
+        title='requests@2.27.0 affected by GHSA-xxxx',
+        file_path='requirements.txt',
+        ecosystem='PyPI',
+        package='requests',
+        version='2.27.0',
+        advisory_id='GHSA-xxxx',
+        scanner='osv',
+    )
+    assert dep_item['key'].startswith('dep:')
+    assert dep_item['details']['fingerprint']==dep_item['fingerprint']
+    assert dep_item['details']['path_id'].startswith('sha256:')
+
+    cov_item=normalize_finding(
+        category='coverage',
+        severity='info',
+        title='File not analyzed',
+        file_path='src/blob.bin',
+        sha='a'*40,
+        scanner='coverage',
+    )
+    assert cov_item['key'].startswith('coverage:')
+    assert compute_fingerprint('coverage',file_path='src/blob.bin',sha='a'*40)==(cov_item['key'],cov_item['fingerprint'])
 
 
 def test_ast_rule_and_no_eval_in_comment():

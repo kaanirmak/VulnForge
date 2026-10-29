@@ -13,7 +13,7 @@ from .dependencies import inventory_manifest, Dependency
 from .github import GitHub
 from .osv import OSV
 from .kev import KEV
-from .scanner import scan_code
+from .scanner import scan_code, normalize_finding
 from .intelligence import recommend_updates, advisory_identity, github_matches
 
 log=logging.getLogger('vulnforge')
@@ -130,13 +130,14 @@ class Agent:
             if not file:
                 coverage['files_skipped']+=1
                 coverage['issues'].append({'path':path,'reason':'content_unavailable'})
-                key='coverage:'+hashlib.sha256(f'{sha}:{path}'.encode()).hexdigest()[:24]
-                f={'key':key,'category':'coverage','severity':'info',
-                   'title':'File not analyzed: unreadable, binary or exceeds size limit',
-                   'file_path':path,'details':{'reason':'content unavailable; do not infer this file is safe'}}
+                f=normalize_finding(
+                    category='coverage',severity='info',
+                    title='File not analyzed: unreadable, binary or exceeds size limit',
+                    file_path=path,sha=sha,scanner='coverage',
+                    details={'reason':'content unavailable; do not infer this file is safe'})
                 self.store.record_scan_finding(scan_id,f)
                 if persist:
-                    self.store.save_finding(repo,key,'coverage','info',f['title'],path,sha,f['details'])
+                    self.store.save_finding(repo,f['key'],'coverage','info',f['title'],path,sha,f['details'])
                 continue
             if len(file['text'])>300_000 or len(file['text'].splitlines())>10000:
                 coverage['files_skipped']+=1
@@ -255,10 +256,14 @@ class Agent:
                      'cvss_vectors':cvss,'epss':None,
                      'update_recommendation':recommendations.get(dep)}
                 title=f'{dep.name}@{dep.version} affected by {id_}'
-                self.store.record_scan_finding(scan_id,{'key':key,'category':'dependency','severity':severity,
-                    'title':title,'file_path':dep.file_path,'details':details})
+                norm_dep=normalize_finding(
+                    category='dependency',severity=severity,title=title,
+                    file_path=dep.file_path,ecosystem=dep.ecosystem,
+                    package=dep.name,version=dep.version,advisory_id=id_,
+                    scanner='osv',details=details)
+                self.store.record_scan_finding(scan_id,norm_dep)
                 if not snapshot_sha:
-                    self.store.save_finding(repo,key,'dependency',severity,title,dep.file_path,head,details)
+                    self.store.save_finding(repo,norm_dep['key'],'dependency',severity,title,dep.file_path,head,norm_dep['details'])
                 impact=impacts.setdefault(canonical,{'dependencies':[],'recommendations':[],
                     'source':source_name})
                 if asdict(dep) not in impact['dependencies']:
