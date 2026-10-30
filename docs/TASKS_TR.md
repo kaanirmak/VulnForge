@@ -141,7 +141,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `Config.environment` (`development`, `staging`, `production`) ayrımı ve durum kontrolleri, production ortamında katı güvenlik invariantları (insecure local auth yasağı, HTTPS zorunluluğu, loopback adresi yasağı, ayrık PostgreSQL rolleri ve yüksek entropili webhook/admin secret'ları) ve `validate_cross_environment_isolation` ile ortamlar arası veri/anahtar/veritabanı çakışmalarını önleyen kontroller tamamlandı.
 - [x] VF-082: TLS, ağ sınırları, güvenli ingress, limitler ve veritabanının özel ağ erişimini kur.
   `SecurityHeadersMiddleware` ile HSTS (`Strict-Transport-Security`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, CSP ve Permissions-Policy başlıkları, production ortamında şifresiz HTTP'ye karşı `TLS_REQUIRED` zorunluluğu, `IngressRateLimiter` ile kayan pencere ingress hız sınırlaması, `validate_database_network_isolation` ile veritabanının RFC 1918 / internal host / SSL zorunluluğu ve `is_safe_egress_endpoint` ile SSRF / metadata ağ engelleme kuralları tamamlandı.
-- [ ] VF-083: GitHub anahtarı ve sırları kasaya taşı; gereksiz API/worker/container erişimini kaldır, rotasyonu test et.
+- [x] VF-083: GitHub anahtarı ve sırları kasaya taşı; gereksiz API/worker/container erişimini kaldır, rotasyonu test et.
+  `SecretVault` ve bileşen bazlı least-privilege erişim modeli (`ScopedVaultView` ile worker, api, github_app, operator izolasyonu), `rotate_secret` ve dual-key grace period mekanizması, `verify_hmac_signature` ile kesintisiz webhook anahtar rotasyonu ve entegrasyon testleri tamamlandı.
 - [ ] VF-084: Veri ve yedek şifrelemesi, anahtar erişimi ve müşteri veri silme görevlerini uygula.
 - [ ] VF-085: Audit'i aktör/organizasyon/repo/iş kimliğiyle genişlet; log maskeleme ve operatör erişimini denetle.
 - [x] VF-086: Kuyruk lease yenileme/sahiplik kontrolü, stale-worker engeli, retry/backoff ve dead-letter akışını kur.

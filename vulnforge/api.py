@@ -24,8 +24,12 @@ class TriageRequest(BaseModel):
 MAX_WEBHOOK_BYTES=2_000_000
 
 
-def signature_ok(body: bytes, header: str | None, secret: str) -> bool:
-    if not secret or not header:
+def signature_ok(body: bytes, header: str | None, secret: str, vault=None) -> bool:
+    if not header:
+        return False
+    if vault:
+        return vault.verify_hmac_signature('webhook_secret', body, header)
+    if not secret:
         return False
     expected='sha256='+hmac.new(secret.encode('utf-8'),body,hashlib.sha256).hexdigest()
     return hmac.compare_digest(expected,header)
@@ -33,11 +37,14 @@ def signature_ok(body: bytes, header: str | None, secret: str) -> bool:
 
 def create_app(cfg: Config | None = None, store: Store | None = None):
     cfg=cfg or Config.from_env()
+    from .vault import SecretVault
+    vault=getattr(cfg, 'vault', None) or SecretVault.from_config(cfg)
     store=store or Store(cfg.database_target,migrate=cfg.database_auto_migrate)
     app=FastAPI(title='VulnForge',version='0.3.0',
                 description='GitHub commit and vulnerability response agent MVP')
     app.state.cfg=cfg
     app.state.store=store
+    app.state.vault=vault
     from .auth_routes import install_auth_routes
     install_auth_routes(app,cfg,store)
     from .organization_routes import install_organization_routes
@@ -149,7 +156,7 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
         body=b''.join(chunks)
         if len(body)>MAX_WEBHOOK_BYTES:
             raise HTTPException(413,'Webhook payload too large')
-        if not signature_ok(body,signature,cfg.webhook_secret):
+        if not signature_ok(body,signature,cfg.webhook_secret,vault=getattr(app.state,'vault',None)):
             raise HTTPException(403,'Invalid webhook signature')
         if not delivery or len(delivery)>128 or not event or len(event)>64:
             raise HTTPException(400,'Missing or invalid delivery/event ID')

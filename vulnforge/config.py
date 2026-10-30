@@ -1,6 +1,7 @@
 """Configuration is loaded at runtime, not at module import time."""
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 import os
 import re
 import json
@@ -12,6 +13,7 @@ from .privacy import MetadataPolicy, PrivacyError
 @dataclass(frozen=True)
 class Config:
     environment: str = "development"
+    vault: Any = None
     webhook_secret: str = ""
     admin_token: str = field(default='',repr=False)
     operator_credentials: tuple[tuple[str,str],...] = field(default=(),repr=False)
@@ -211,6 +213,10 @@ class Config:
         )
 
     def private_key(self) -> str:
+        if self.vault:
+            val = self.vault.get_secret('github_private_key')
+            if val:
+                return val
         if not self.private_key_path:
             raise ValueError("GITHUB_PRIVATE_KEY_PATH is not configured")
         return Path(self.private_key_path).read_text(encoding="utf-8")
