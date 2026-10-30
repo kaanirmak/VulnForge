@@ -168,3 +168,4 @@ class SecretVault:
             except Exception:
                 pass
         return vault
+

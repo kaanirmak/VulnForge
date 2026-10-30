@@ -110,3 +110,4 @@ def test_automerge_approved_when_all_gates_pass():
     )
     assert decision.eligible is True
     assert any("All CI, policy, SHA freshness" in r for r in decision.reasons)
+

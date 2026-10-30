@@ -142,3 +142,4 @@ class InjectionExfiltrationDetector:
                 threats.append(f"Exfiltration pattern detected: '{match.group(0)[:60]}'")
 
         return len(threats) == 0, threats
+

@@ -176,10 +176,13 @@ def test_csrf_and_foreign_org_rejected_before_flow_creation(onboarding):
     with onboarding[0].conn() as c:assert c.execute('SELECT COUNT(*) FROM connection_intents').fetchone()[0]==0
 
 
-def test_complete_connection_records_consent_without_source_job_or_inventory(onboarding):
+@pytest.mark.parametrize('issuer',[None,'https://github.com/login/oauth'])
+def test_complete_connection_records_consent_without_source_job_or_inventory(onboarding,issuer):
     client,headers,state=start(onboarding)
     store,data,cfg,app=onboarding;verifier=FixtureVerifier();app.state.connection_verifier=verifier
-    response=client.get(CALLBACK,params={'state':state,'code':'fixture-code'},follow_redirects=False)
+    params={'state':state,'code':'fixture-code'}
+    if issuer is not None:params['iss']=issuer
+    response=client.get(CALLBACK,params=params,follow_redirects=False)
     assert response.status_code==303 and response.headers['location']=='/account?connection=connected'
     assert client.cookies.get('vf_local_connect') is None
     assert verifier.calls==[('fixture-code','alpha/new-project',100)]
@@ -263,6 +266,10 @@ def test_restarting_flow_invalidates_previous_choice_and_expired_flow_is_rejecte
 def test_callback_unknown_parameters_and_slashes_never_reach_provider(onboarding):
     client,_,state=start(onboarding);verifier=FixtureVerifier();onboarding[3].state.connection_verifier=verifier
     for params in ({'state':state,'code':'code','installation_id':'1'},
+        {'state':state,'code':'code','iss':'https://evil.example'},
+        {'state':state,'code':'code','iss':''},
+        [('state',state),('code','code'),('iss','https://github.com/login/oauth'),
+         ('iss','https://github.com/login/oauth')],
         [('state',state),('state',state),('code','code')],{'state':state,'code':'code','error':'denied'}):
         assert client.get(CALLBACK,params=params,follow_redirects=False).status_code==400
     assert client.get(CALLBACK+'/',params={'state':state,'code':'code'}).status_code==400

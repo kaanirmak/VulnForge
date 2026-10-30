@@ -236,3 +236,4 @@ class EnterpriseComplianceManager:
         bundle_bytes = json.dumps(bundle_payload, sort_keys=True).encode()
         bundle_payload["bundle_sha256"] = hashlib.sha256(bundle_bytes).hexdigest()
         return bundle_payload
+

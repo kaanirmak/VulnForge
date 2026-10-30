@@ -196,3 +196,4 @@ with open("test_file.txt", "w") as f:
     assert "vf_isolated_" in created_workspace
     # The temporary directory must no longer exist on disk
     assert not os.path.exists(created_workspace)
+

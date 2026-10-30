@@ -188,3 +188,4 @@ def test_role_and_queue_isolation(dual_tenant_env):
     assert claimed is not None
     assert claimed["repo"] == beta["repo"]
     assert claimed["organization_id"] == beta["org_id"]
+

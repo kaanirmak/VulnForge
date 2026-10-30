@@ -51,3 +51,4 @@ config = AirgappedConfig(airgapped=True)
 # Bu çağrı harici internet adreslerinde ValueError fırlatır:
 validate_airgapped_isolation(config, ["https://git.internal.corp", "https://db.internal"])
 ```
+

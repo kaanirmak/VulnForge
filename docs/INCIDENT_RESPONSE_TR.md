@@ -58,3 +58,4 @@ Bu doküman, kritik güvenlik olaylarında (anahtar sızıntısı, yetkisiz eri�
 - **Stale Feed Alarmı**: Son başarılı OSV/GHSA ingestion üzerinden $> 86400$ saniye (24 saat) geçtiğinde tetiklenir.
 - **PR Flood Alarmı**: 1 saat içinde bir organizasyonda $> 20$ otomatik PR oluşturulmaya çalışıldığında tetiklenir.
 - **Brute-Force / Abuse Alarmı**: 5 dakika içinde 15'ten fazla 401/403/CSRF hatası alındığında aktör geçici olarak bloklanır.
+

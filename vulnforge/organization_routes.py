@@ -11,7 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel,ConfigDict,Field
 
-from .auth import AuthSessions,digest
+from .auth import AuthSessions,digest,GITHUB_OAUTH_ISSUER
 from .identity import Identities
 from .organization import OrganizationData,ResourceNotFound,RoleDenied
 from .reports import sarif,sbom
@@ -118,6 +118,9 @@ def install_organization_routes(app,cfg,store):
     from .connections import ConnectionFlows,GitHubConnectionVerifier,CALLBACK
     app.state.connection_verifier=GitHubConnectionVerifier(cfg)
     flows=ConnectionFlows(store,cfg)
+    from .repository_choices import RepositoryChoices
+    choices=RepositoryChoices()
+    app.state.repository_choices=choices
     data_store=store
     from .quotas import TenantQuotaManager, QuotaExceededError, AbuseBlockedError
     quota_mgr = getattr(app.state, 'quota_manager', None)
@@ -331,7 +334,8 @@ def install_organization_routes(app,cfg,store):
         if not cfg.github_connection_preview: raise HTTPException(503,'Connection preview is not enabled')
         user=await principal(request)
         params=request.state.oauth_callback
-        if (set(params)-{'state','code','error','error_description','error_uri'} or
+        if (set(params)-{'state','code','error','error_description','error_uri','iss'} or
+            ('iss' in params and params['iss']!=GITHUB_OAUTH_ISSUER) or
             any(len(params.getlist(key))!=1 for key in params) or
             ('code' in params and 'error' in params) or
             ('error' not in params and not re.fullmatch(r'[A-Za-z0-9_-]{1,512}',params.get('code','')))):
@@ -340,10 +344,18 @@ def install_organization_routes(app,cfg,store):
             intent=flows.consume(params.get('state',''),request.cookies.get(sessions.cookie_prefix+'connect',''),
                                  user['session_hash'])
             if 'error' in params: raise AuthError('Authorization declined')
-            proof=await app.state.connection_verifier.verify(params['code'],
-                request.cookies.get(sessions.cookie_prefix+'connect',''),intent['repo'],intent['github_id'])
-            flows.complete(intent,proof)
-            outcome='connected'
+            verifier=request.cookies.get(sessions.cookie_prefix+'connect','')
+            if intent['consent_version']=='repository-selection-v1':
+                items=await app.state.connection_verifier.discover(params['code'],verifier,intent['github_id'])
+                flows.authorize_selection(intent['organization_id'],user['session_hash'])
+                if not 0<=time.time()-intent['created_at']<FLOW_SECONDS:
+                    raise AuthError('Repository selection expired')
+                choices.put(user['session_hash'],intent['organization_id'],items)
+                outcome='choose'
+            else:
+                proof=await app.state.connection_verifier.verify(params['code'],verifier,intent['repo'],intent['github_id'])
+                flows.complete(intent,proof)
+                outcome='connected'
         except (AuthError,ConnectionDenied,ConnectionConflict,MetadataError,PermissionError,ValueError):
             outcome='failed'
         response=RedirectResponse('/account?connection='+outcome,status_code=303)
@@ -362,6 +374,23 @@ def install_organization_routes(app,cfg,store):
         return membership_operation(Identities(store).accept_invitation,body.token,user['id'])
 
     router=APIRouter(prefix=ROOT+'/{organization_id}')
+
+    @router.post('/connections/discover',dependencies=[Depends(csrf)])
+    async def discover_repositories(organization_id:str,user=Depends(principal)):
+        from .auth import FLOW_SECONDS
+        try:
+            location,verifier=flows.begin(organization_id,user['session_hash'],None,None,False,discovery=True)
+        except PermissionError:raise HTTPException(403,'Repository selection is not authorized') from None
+        response=JSONResponse({'authorization_url':location,'expires_in':FLOW_SECONDS})
+        response.set_cookie(sessions.cookie_prefix+'connect',verifier,max_age=FLOW_SECONDS,path='/',
+                            secure=sessions.secure,httponly=True,samesite='lax')
+        return response
+
+    @router.get('/connections/choices')
+    async def repository_choices(organization_id:str,user=Depends(principal)):
+        try:flows.authorize_selection(organization_id,user['session_hash'])
+        except PermissionError:raise HTTPException(403,'Repository selection is not authorized') from None
+        return choices.get(user['session_hash'],organization_id)
 
     @router.post('/connections/begin',dependencies=[Depends(csrf)])
     async def begin_connection(organization_id:str,body:ConnectionBegin,user=Depends(principal)):

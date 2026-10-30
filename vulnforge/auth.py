@@ -20,6 +20,7 @@ from .identity import Identities
 FLOW_SECONDS=600
 SESSION_SECONDS=8*3600
 IDLE_SECONDS=30*60
+GITHUB_OAUTH_ISSUER='https://github.com/login/oauth'
 OPAQUE=re.compile(r'[A-Za-z0-9_-]{43,128}\Z')
 
 

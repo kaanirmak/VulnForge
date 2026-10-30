@@ -153,3 +153,4 @@ def test_customer_organization_data_purge_lifecycle(tmp_path):
     # 4. Subsequent queries for organization return 404 Not Found
     res_after = client.get(f'/api/v1/organizations/{org_id}/overview')
     assert res_after.status_code == 404
+

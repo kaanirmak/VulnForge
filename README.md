@@ -27,7 +27,7 @@ Aşağıdaki bileşenler yerel geliştirme ve test kapsamında mevcuttur. Uçtan
 | Alan | Mevcut yetenek | Açık sınır |
 |---|---|---|
 | Yerel tarama | Ağ çağrısı yapmadan çalışan CLI, temel AST/regex kod kuralları ve altı bağımlılık dosyası formatı | Semgrep/Gitleaks entegrasyonu ve tam çözümlenmiş bağımlılık grafı yok |
-| GitHub bağlantısı | OAuth, oturum, rol kontrolleri ve kaynak erişimsiz proje bağlantısı önizlemesi | Canlı sağlayıcı kabulü, tam repo seçimi ve yetki değişimi uzlaştırması açık |
+| GitHub bağlantısı | OAuth, oturum, rol kontrolleri ve kaynak erişimsiz proje bağlantısı önizlemesi | Canlı sağlayıcı kabulü, yetki değişimi uzlaştırması ve üretim kabulü açık |
 | Müşteri raporları | Sürümlü metadata şeması, kaynak/sır reddi, OIDC doğrulama kodu ve karantina | Raporların güvenilir proje envanterine alınması kapalı |
 | Açık takibi | OSV ve imzalı GHSA akışı, proje etkisi, sürüm adayı kontrolleri ve isteğe bağlı KEV | Feed uzlaştırması, registry ve uyumluluk doğrulaması tamamlanmadı |
 | Bulgular ve görünürlük | Yerel org/proje paneli, commit/kapsam/tazelik bilgisi, bulgu geçmişi, süreli suppression, SBOM/SARIF çıktıları | İleri panel, bildirimler ve çıktıların resmi şemalarla tam kabulü açık |
@@ -77,7 +77,7 @@ PostgreSQL kontrolü kendine ait geçici, yerel socket kullanan bir cluster olu�
 
 ### Yerel API ve GitHub önizlemesi
 
-`.env.example` üzerinden yerel `.env` dosyanı oluştur; mevcut dosyan varsa ayarları karşılaştırarak güncelle. Bağımsız rastgele sırları üret, dosyayı yalnız sahibinin okuyabileceği şekilde koru ve Git'e ekleme. Gerçek App/OAuth kurulumu için [ilk GitHub testi rehberini](docs/USER_NEXT_STEPS_TR.md) izle.
+`.env.example` üzerinden yerel `.env` dosyanı oluştur; mevcut dosyan varsa ayarları karşılaştırarak güncelle. Bağımsız rastgele sırları üret, dosyayı yalnız sahibinin okuyabileceği şekilde koru ve Git'e ekleme. Gerçek App/OAuth kurulumu için [ilk GitHub testi rehberini](docs/USER_NEXT_STEPS_TR.md) izle. Yenilenen panel ve gerçek depo seçimi için [çalışma alanı rehberi](docs/WORKSPACE_UI_TR.md).
 
 ```bash
 python -m vulnforge.setup_check --env-file .env

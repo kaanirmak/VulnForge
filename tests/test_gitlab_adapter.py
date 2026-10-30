@@ -105,3 +105,4 @@ def test_gitlab_oauth_url_and_mr_note_formatting():
     assert "CRITICAL" in findings_note
     assert "`lodash`" in findings_note
     assert "CVE-2021-23337" in findings_note
+

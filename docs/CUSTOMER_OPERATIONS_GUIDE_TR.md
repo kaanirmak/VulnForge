@@ -99,3 +99,4 @@ Bu işlem:
 ### Soru 4: Oturum sona erdiğinde arayüz yanıt vermiyor.
 - **Neden**: 8 saatlik oturum süresi dolmuş olabilir.
 - **Çözüm**: Sağ üst köşedeki "Giriş Yap" düğmesini kullanarak GitHub OAuth ile oturumu yenileyin.
+

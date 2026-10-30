@@ -62,3 +62,4 @@ Aşağıdaki eşikler VulnForge telemetry ve metrik toplayıcısı (`vulnforge/t
 ## 4. İyileştirme ve Pilot Kabul Kararı
 
 Ölçülen metrikler ve sentetik pilot yük testleri, VulnForge mimarisinin belirlenen SLO hedeflerini rahatlıkla karşıladığını ve canlı üretime hazır olduğunu teyit etmiştir.
+

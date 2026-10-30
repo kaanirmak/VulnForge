@@ -90,3 +90,4 @@ def evaluate_automerge_readiness(
         head_sha=head_sha,
         base_sha=current_base_sha,
     )
+

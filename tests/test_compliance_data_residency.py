@@ -100,3 +100,4 @@ def test_immutable_audit_ledger_and_compliance_bundle():
     assert bundle["audit_ledger"]["total_events"] == 2
     assert bundle["audit_ledger"]["chain_head_hash"] == e2["record_hash"]
     assert "bundle_sha256" in bundle
+

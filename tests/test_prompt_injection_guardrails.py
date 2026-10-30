@@ -102,3 +102,4 @@ def test_exfiltration_detection():
     clean_output = "The vulnerability in requests 2.25.0 is fixed in 2.31.0."
     is_safe3, threats3 = InjectionExfiltrationDetector.scan_for_exfiltration(clean_output)
     assert is_safe3 is True
+

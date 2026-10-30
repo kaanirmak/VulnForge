@@ -7,7 +7,7 @@ from fastapi import HTTPException,Request
 from fastapi.responses import HTMLResponse,JSONResponse,RedirectResponse,Response
 from starlette.datastructures import QueryParams
 
-from .auth import AuthError,AuthSessions,GitHubLogin,FLOW_SECONDS,SESSION_SECONDS
+from .auth import AuthError,AuthSessions,GitHubLogin,FLOW_SECONDS,SESSION_SECONDS,GITHUB_OAUTH_ISSUER
 
 
 def install_auth_routes(app,cfg,store):
@@ -71,7 +71,8 @@ def install_auth_routes(app,cfg,store):
         require_origin(request)
         params=request.state.oauth_callback
         # Do not accept a return URL, installation ID or caller-supplied user ID.
-        if (set(params)-{'state','code','error','error_description','error_uri'} or
+        if (set(params)-{'state','code','error','error_description','error_uri','iss'} or
+            ('iss' in params and params['iss']!=GITHUB_OAUTH_ISSUER) or
             any(len(params.getlist(key))!=1 for key in params) or
             ('code' in params and 'error' in params)):
             raise HTTPException(400,'Invalid sign-in callback')
@@ -118,6 +119,10 @@ def install_auth_routes(app,cfg,store):
             sessions.logout(request.cookies.get(sessions.cookie_prefix+'session'),csrf)
         except AuthError:
             raise HTTPException(403,'Session or CSRF check failed') from None
+        choices=getattr(app.state,'repository_choices',None)
+        if choices is not None:
+            from .auth import digest
+            choices.clear_session(digest(request.cookies.get(sessions.cookie_prefix+'session','')))
         response=Response(status_code=204)
         for name in ('session','oauth'): clear_cookie(response,name)
         clear_cookie(response,'csrf',http_only=False)

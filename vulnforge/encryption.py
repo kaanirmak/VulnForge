@@ -103,3 +103,4 @@ def restore_encrypted_backup(backup_path: Union[str, Path], restore_path: Union[
         'restored_bytes': len(decrypted),
         'restored_sha256': hashlib.sha256(decrypted).hexdigest()
     }
+

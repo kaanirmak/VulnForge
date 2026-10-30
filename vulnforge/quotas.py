@@ -112,3 +112,4 @@ class TenantQuotaManager:
             return True
         limit = max_concurrency or self.default_max_concurrency
         return self.get_active_concurrency(store, org_id) < limit
+

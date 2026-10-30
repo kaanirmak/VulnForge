@@ -69,3 +69,4 @@ Tatbikatlar aylık periyotlarla otomatik olarak çalıştırılır:
 - Boş bir geçici ortama geri yüklenir.
 - Tenant izolasyonu, bulgu sayıları ve veri tutarlılığı test edilir.
 - RPO ve RTO süreleri ölçülerek standartlara uyum raporlanır.
+

@@ -80,3 +80,4 @@ def test_generate_onprem_compose():
     assert "vulnforge/server:0.3.0" in compose_yaml
     assert "AIRGAPPED: \"true\"" in compose_yaml
     assert "internal: true" in compose_yaml
+

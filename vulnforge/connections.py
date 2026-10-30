@@ -29,49 +29,73 @@ class VerifiedConnection:
 
 
 class GitHubConnectionVerifier(GitHubLogin):
+    @staticmethod
+    async def _pages(client,headers,path,key,maximum):
+        records=[];total=None;seen=set()
+        for page in range(1,maximum//100+2):
+            data=await bounded_json(client,'GET','https://api.github.com'+path,
+                limit=2_000_000,headers=headers,params={'per_page':100,'page':page})
+            count=data.get('total_count');rows=data.get(key)
+            if (type(count) is not int or not 0<=count<=maximum or
+                not isinstance(rows,list) or len(rows)>100 or
+                (total is not None and count!=total)):
+                raise AuthError('Provider listing is incomplete')
+            total=count
+            for row in rows:
+                id_=row.get('id') if isinstance(row,dict) else None
+                if type(id_) is not int or not 0<id_<2**63 or id_ in seen:
+                    raise AuthError('Provider listing is ambiguous')
+                seen.add(id_);records.append(row)
+            if len(records)==total:return records
+            if len(records)>total or not rows:raise AuthError('Provider listing is incomplete')
+        raise AuthError('Provider listing exceeds limit')
+
+    async def _catalog(self,client,token,owner=None):
+        headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json',
+                 'Accept-Encoding':'identity','X-GitHub-Api-Version':'2026-03-10'}
+        catalog=[];seen=set()
+        for installation in await self._pages(client,headers,'/user/installations','installations',500):
+            if type(installation.get('app_id')) is not int or installation['app_id']!=int(self.cfg.app_id):
+                raise AuthError('OAuth client and App do not match')
+            if installation.get('suspended_at') is not None:continue
+            if installation.get('permissions')!={'metadata':'read'}:
+                raise AuthError('Metadata-only App required')
+            account=installation.get('account')
+            if not isinstance(account,dict):raise AuthError('Invalid installation account')
+            if owner is not None and account.get('login')!=owner:continue
+            rows=await self._pages(client,headers,'/user/installations/'+str(installation['id'])+'/repositories','repositories',2000)
+            for row in rows:
+                name=row.get('full_name')
+                if (not isinstance(name,str) or len(name)>256 or
+                    not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',name) or '..' in name or
+                    row['id'] in seen):
+                    raise AuthError('Invalid repository listing')
+                seen.add(row['id']);catalog.append((installation,row))
+                if len(catalog)>2000:raise AuthError('Repository listing exceeds limit')
+        return catalog
+
+    async def discover(self,code,verifier,github_user_id):
+        async def inspect(client,token,user):
+            if user['id']!=github_user_id:raise AuthError('GitHub account changed')
+            choices=[]
+            for installation,row in await self._catalog(client,token):
+                if row.get('permissions',{}).get('admin') is not True:continue
+                # Only bounded display metadata leaves this request. Never tokens.
+                choices.append({'full_name':row['full_name']})
+            return sorted(choices,key=lambda row:row['full_name'].lower())
+        return await self._authorize(code,verifier,CALLBACK,inspect)
+
     async def verify(self,code,verifier,repo,github_user_id):
         async def inspect(client,token,user):
-            if user['id']!=github_user_id: raise AuthError('GitHub account changed')
-            headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json',
-                     'Accept-Encoding':'identity','X-GitHub-Api-Version':'2026-03-10'}
-
-            async def pages(path,key,maximum):
-                records=[];total=None;seen=set()
-                for page in range(1,maximum//100+2):
-                    data=await bounded_json(client,'GET','https://api.github.com'+path,
-                        limit=2_000_000,headers=headers,params={'per_page':100,'page':page})
-                    count=data.get('total_count');rows=data.get(key)
-                    if (type(count) is not int or not 0<=count<=maximum or
-                        not isinstance(rows,list) or len(rows)>100 or
-                        (total is not None and count!=total)):
-                        raise AuthError('Provider listing is incomplete')
-                    total=count
-                    for row in rows:
-                        id_=row.get('id') if isinstance(row,dict) else None
-                        if type(id_) is not int or not 0<id_<2**63 or id_ in seen:
-                            raise AuthError('Provider listing is ambiguous')
-                        seen.add(id_);records.append(row)
-                    if len(records)==total: return records
-                    if len(records)>total or not rows: raise AuthError('Provider listing is incomplete')
-                raise AuthError('Provider listing exceeds limit')
-
+            if user['id']!=github_user_id:raise AuthError('GitHub account changed')
             matches=[]
-            for installation in await pages('/user/installations','installations',500):
-                if type(installation.get('app_id')) is not int or installation['app_id']!=int(self.cfg.app_id):
-                    raise AuthError('OAuth client and App do not match')
-                if installation.get('suspended_at') is not None: continue
-                if installation.get('permissions')!={'metadata':'read'}:
-                    raise AuthError('Metadata-only App required')
-                if installation.get('account',{}).get('login')!=repo.split('/')[0]: continue
-                # No provider-supplied repositories_url is followed.
-                rows=await pages('/user/installations/'+str(installation['id'])+'/repositories','repositories',2000)
-                for row in rows:
-                    if row.get('full_name')!=repo: continue
-                    permissions=row.get('permissions')
-                    if not isinstance(permissions,dict) or permissions.get('admin') is not True:
-                        raise AuthError('GitHub repository administrator required')
-                    matches.append((installation,row))
-            if len(matches)!=1: raise AuthError('Selected repository is not uniquely accessible')
+            for installation,row in await self._catalog(client,token,repo.split('/')[0]):
+                if row.get('full_name')!=repo:continue
+                permissions=row.get('permissions')
+                if not isinstance(permissions,dict) or permissions.get('admin') is not True:
+                    raise AuthError('GitHub repository administrator required')
+                matches.append((installation,row))
+            if len(matches)!=1:raise AuthError('Selected repository is not uniquely accessible')
             installation,row=matches[0]
             verified=await GitHubMetadata(self.cfg,client).repository(repo,installation['id'])
             if (row['id']!=verified['repository_id'] or type(row.get('owner',{}).get('id')) is not int or
@@ -96,9 +120,11 @@ class ConnectionFlows:
         Identities._require_admin(c,organization,row['user_id'])
         return dict(row)
 
-    def begin(self,organization,session_hash,repo,consent_version,consent):
+    def begin(self,organization,session_hash,repo,consent_version,consent,*,discovery=False):
         if not self.cfg.github_connection_preview: raise ConnectionDenied('Connection preview is disabled')
-        if (consent is not True or consent_version!=CONSENT or not isinstance(repo,str) or
+        if discovery:
+            repo='__repository_selection__';consent_version='repository-selection-v1'
+        if not discovery and (consent is not True or consent_version!=CONSENT or not isinstance(repo,str) or
             len(repo)>256 or not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repo) or '..' in repo):
             raise ValueError('Repository and explicit metadata consent required')
         with self.store.transaction(),self.store.conn() as c:
@@ -115,9 +141,9 @@ class ConnectionFlows:
             location,verifier=self.sessions.begin(CALLBACK)
             state=parse_qs(urlsplit(location).query)['state'][0]
             c.execute('INSERT INTO connection_intents VALUES(?,?,?,?,?,?,?)',
-                      (digest(state),session_hash,organization,repo,existing['connection_id'] if existing else None,CONSENT,time.time()))
-            self.store.audit_event('organization:'+organization,None,actor['user_id'],'connection_consent_started',
-                                   {'organization_id':organization,'consent_version':CONSENT})
+                      (digest(state),session_hash,organization,repo,existing['connection_id'] if existing else None,consent_version,time.time()))
+            self.store.audit_event('organization:'+organization,None,actor['user_id'],'repository_selection_started' if discovery else 'connection_consent_started',
+                                   {'organization_id':organization,'consent_version':consent_version})
         return location,verifier
 
     def consume(self,state,verifier,session_hash):
@@ -130,6 +156,11 @@ class ConnectionFlows:
             self.sessions.consume(state,verifier)
             # consume deletes the auth state and its intent via FK cascade.
             return {**intent,'github_id':actor['github_id'],'user_id':actor['user_id']}
+
+    def authorize_selection(self,organization,session_hash):
+        if not self.cfg.github_connection_preview:raise ConnectionDenied('Connection preview is disabled')
+        with self.store.transaction(),self.store.conn() as c:
+            self._authority(c,session_hash,organization)
 
     def complete(self,intent,proof):
         if (not isinstance(proof,VerifiedConnection) or proof.repo!=intent['repo'] or

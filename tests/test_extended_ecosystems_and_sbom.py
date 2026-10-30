@@ -145,3 +145,4 @@ def test_parse_spdx_sbom():
     assert deps[0].name == "openssl"
     assert deps[0].version == "3.0.8-r0"
     assert deps[0].digest == "sha256:abcdef1234567890"
+

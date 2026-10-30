@@ -145,3 +145,4 @@ def test_evaluate_incident_signals():
     assert "resource_exhaustion" in categories
     assert "unauthorized_access" in categories
     assert any(a.severity == "SEV-1" for a in alerts)
+

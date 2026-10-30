@@ -119,6 +119,25 @@ def test_callback_verifies_provider_then_stores_minimal_identity_and_hashed_sess
     assert finish(client,params).status_code==401 and len(calls)==2
 
 
+def test_callback_accepts_verified_github_issuer(auth_app):
+    client,_,_,calls,_=auth_app
+    _,params=start(client)
+    assert finish(client,params,iss='https://github.com/login/oauth').status_code==303
+    assert len(calls)==2
+
+
+@pytest.mark.parametrize('issuer',['','https://evil.example','https://github.com/login/oauth/',
+                                  'https://github.com','http://github.com/login/oauth'])
+def test_callback_rejects_wrong_issuer_before_provider(auth_app,issuer):
+    client,_,_,calls,_=auth_app
+    _,params=start(client)
+    assert finish(client,params,iss=issuer).status_code==400
+    state=params['state'][0]
+    assert client.get('/auth/github/callback',params=[('state',state),('code','fixture-code'),
+        ('iss','https://github.com/login/oauth'),('iss',issuer)]).status_code==400
+    assert not calls
+
+
 def test_stolen_state_is_bound_to_the_starting_browser(auth_app):
     client,store,cfg,calls,_=auth_app
     _,params=start(client)

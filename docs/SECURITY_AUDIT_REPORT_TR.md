@@ -46,3 +46,4 @@ Aşağıdaki saldırı yüzeyleri kapsamlı olarak test edilmiştir:
 ## 4. Regresyon ve Otomasyon Kanıtı
 
 Yukarıdaki güvenlik mekanizmaları `tests/test_security_audit_and_pentest.py` test paketi ile sürekli entegrasyon (CI) boru hattına entegre edilmiştir.
+

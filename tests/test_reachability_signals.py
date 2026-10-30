@@ -91,3 +91,4 @@ def upload_endpoint(payload: str):
     # Upgraded/flagged with critical urgency due to route exposure
     assert assessment.contextual_severity == "critical"
     assert "public HTTP route handlers" in assessment.evidence_rationale
+

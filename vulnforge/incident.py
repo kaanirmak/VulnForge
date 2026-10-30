@@ -194,3 +194,4 @@ class IncidentManager:
             )
 
         return alerts
+

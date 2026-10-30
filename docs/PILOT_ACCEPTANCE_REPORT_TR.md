@@ -50,3 +50,4 @@ Aşağıdaki zorunlu kontroller tamamlanmış ve operasyonel olarak doğrulanmı
 ## 4. Dış Yayımlama Onayı
 
 > **NOT**: VulnForge v0.3.0, P0 ve P1 aşamalarındaki tüm gereksinimleri (VF-001'den VF-100'e kadar) karşılamış olup kapalı pilot kabulünden başarıyla geçmiştir. Genel dış yayımlama ve üretim dağıtımı işletici onayı ile canlıya alınabilir.
+

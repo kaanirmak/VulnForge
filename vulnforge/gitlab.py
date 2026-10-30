@@ -149,3 +149,4 @@ class GitLabAdapter:
 
         lines.append("\n*Scan verified by VulnForge policy engine.*")
         return "\n".join(lines)
+
