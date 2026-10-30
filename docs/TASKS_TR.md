@@ -153,7 +153,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 
 ## J. Doğrulama ve ilk yayın — P0/P1 yayın kapıları
 
-- [ ] VF-091: Mevcut çalışma ağacı değişikliklerini gözden geçir, tekrarlanabilir bağımlılık/CI düzenine al ve sürümle.
+- [x] VF-091: Mevcut çalışma ağacı değişikliklerini gözden geçir, tekrarlanabilir bağımlılık/CI düzenine al ve sürümle.
 - [ ] VF-092: İki ayrı müşteriyle çapraz hesap/rol/repo/scan/export/queue erişim testlerini çalıştır.
 - [ ] VF-093: Müşteri koşucusu trafiğini incele; kaynak/sır/log sızıntısı olmadığını negatif payload testleriyle doğrula.
 - [ ] VF-094: Canlı kontrollü repolarda kurulum→ilk scan→push/PR→yeni advisory→öneri→uninstall kabul testini çalıştır.
