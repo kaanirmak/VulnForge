@@ -196,7 +196,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `vulnforge/llm_triage.py` ile varsayılan kapalı (`enabled=False`), açık yönetici onayı (opt-in) zorunluluğu, yerel (Ollama / vLLM) ve uzaktaki model seçenekleri, giden veri koruması (`allow_remote_data_transfer`), hassas sır/kod maskeleme ve insan onayı kapısı (`requires_human_approval`) içeren test paketi (`tests/test_llm_triage_opt_in.py`) tamamlandı.
 - [x] VF-107: Modelden bağımsız tool/policy gate, yapılandırılmış çıktı ve prompt-injection/exfiltration değerlendirme seti kur.
   `vulnforge/llm_guardrails.py` ile modelden bağımsız araç yürütme ve dizin aşımı/komut enjeksiyonu denetimi (`PolicyGate`), katı JSON şema doğrulayıcısı (`StructuredOutputValidator`), adversarial prompt injection ve markdown/veri sızıntısı dedektörü (`InjectionExfiltrationDetector`) ile test paketi (`tests/test_prompt_injection_guardrails.py`) tamamlandı.
-- [ ] VF-108: Tüm CI, policy, güncel SHA ve onay kapıları tamamlandıktan sonra dar kapsamlı koşullu automerge pilotu değerlendir.
+- [x] VF-108: Tüm CI, policy, güncel SHA ve onay kapıları tamamlandıktan sonra dar kapsamlı koşullu automerge pilotu değerlendir.
 - [ ] VF-109: Kullanım/plan limitleri, bütçe görünürlüğü ve gerekiyorsa ödeme/faturalandırma ekle.
 - [ ] VF-110: Veri bölgesi, ayrı müşteri ortamı/anahtarı ve kurumsal denetim/uyumluluk ihtiyaçlarını ürünleştir.
 
