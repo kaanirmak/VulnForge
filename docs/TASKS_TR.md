@@ -25,7 +25,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 
 - [x] VF-011: PostgreSQL şemasını ve sürümlü migration altyapısını oluştur; SQLite verisini taşıma yolunu test et.
 - [x] VF-012: Kullanıcı, organizasyon, üyelik ve repo sahipliği modelini oluştur.
-- [ ] VF-013: GitHub ile giriş; state, callback doğrulaması ve uygulanabilir güvenli OAuth kontrollerini ekle.
+- [x] VF-013: GitHub ile giriş; state, callback doğrulaması ve uygulanabilir güvenli OAuth kontrollerini ekle.
+  PKCE S256 challenge ve verifier doğrulaması, tek kullanımlık state özetleri, sabit origin callback doğrulaması, provider access token saklamama ve 40 yerel protokol testi (`tests/test_auth.py`) ile tamamlandı. [Detaylar](GITHUB_LOGIN_TR.md).
 - [ ] VF-014: Güvenli oturum, çıkış, süre sonu, CSRF ve cookie kontrollerini ekle.
 - [x] VF-015: Org Admin, Maintainer, Analyst, Viewer/Auditor rollerini uygula.
 - [x] VF-016: Repo, scan, finding, impact, öneri ve export sorgularını organizasyon kapsamına bağla.
