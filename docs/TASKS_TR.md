@@ -45,7 +45,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `vulnforge/github_app.py` ile herkese açık App manifesti, katı HTTPS doğrulaması, webhook adresi (`/github/webhook`) ve OAuth callback rotaları (`/auth/github/callback` ve `/auth/github/connect/callback`) yapılandırması tamamlandı.
 - [x] VF-023: Panelde GitHub ile giriş ve Proje bağla akışını oluştur.
   Müşteri arayüzünde (`account.html`) GitHub ile giriş ve Proje bağla (`/auth/github/connect`, `POST /api/v1/organizations/{org_id}/connections/begin`) akışı ve doğrulama testleri (`tests/test_connections.py`) tamamlandı.
-- [ ] VF-024: Kurulum dönüşünü oturum ve kurulum yetkisiyle doğrula; rastgele installation_id ile hesap bağlanmasını engelle.
+- [x] VF-024: Kurulum dönüşünü oturum ve kurulum yetkisiyle doğrula; rastgele installation_id ile hesap bağlanmasını engelle.
+  Kurulum dönüşünde (`/auth/github/connect/callback`) oturum kimliği, GitHub admin yetki kontrolü ve intent doğrulaması ile rastgele installation_id bağlanmasını engelleyen koruma ve testler (`tests/test_connections.py`) tamamlandı.
 - [ ] VF-025: Kullanıcının erişebildiği kurulum ve repoları listele; repo seçimi/senkronizasyonu ekle.
 - [x] VF-026: Kullanıcıya istenen izinleri, tarama modunu ve veri paylaşımını onay öncesinde göster.
 - [ ] VF-027: İlk tarama/ilk envanter akışını kur; bekleyen ve hatalı kurulum durumlarını göster.
