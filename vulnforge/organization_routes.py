@@ -27,6 +27,7 @@ ERROR_CODE_MAP = {
     409: 'CONFLICT',
     413: 'PAYLOAD_TOO_LARGE',
     422: 'UNPROCESSABLE_ENTITY',
+    429: 'TOO_MANY_REQUESTS',
     500: 'INTERNAL_ERROR',
     502: 'BAD_GATEWAY',
     503: 'SERVICE_UNAVAILABLE'
@@ -118,6 +119,11 @@ def install_organization_routes(app,cfg,store):
     app.state.connection_verifier=GitHubConnectionVerifier(cfg)
     flows=ConnectionFlows(store,cfg)
     data_store=store
+    from .quotas import TenantQuotaManager, QuotaExceededError, AbuseBlockedError
+    quota_mgr = getattr(app.state, 'quota_manager', None)
+    if quota_mgr is None:
+        quota_mgr = TenantQuotaManager()
+        app.state.quota_manager = quota_mgr
     if cfg.customer_api_preview and store.backend=='postgresql':
         if not cfg.customer_database_url:
             raise ValueError('PostgreSQL customer preview requires a separate restricted connection')
@@ -135,6 +141,13 @@ def install_organization_routes(app,cfg,store):
         return {**user,'session_hash':digest(token)}
 
     async def scoped(organization_id:str,user=Depends(principal)):
+        cur_qm = getattr(app.state, 'quota_manager', quota_mgr)
+        try:
+            cur_qm.check_and_consume_api_quota(organization_id)
+        except QuotaExceededError as e:
+            raise HTTPException(429, detail=str(e), headers={'Retry-After': str(e.retry_after)})
+        except AbuseBlockedError as e:
+            raise HTTPException(429, detail=str(e), headers={'Retry-After': str(e.unblock_in)})
         return OrganizationData(data_store,organization_id,user['id'],user['session_hash'])
 
     async def csrf(request:Request,user=Depends(principal)):
@@ -143,6 +156,9 @@ def install_organization_routes(app,cfg,store):
         if (request.headers.get('origin')!=cfg.public_origin or not token or
             not hmac.compare_digest(token.encode(),cookie.encode()) or
             not hmac.compare_digest(digest(token),user['csrf_hash'])):
+            client_ip = request.client.host if request.client else 'unknown'
+            cur_qm = getattr(app.state, 'quota_manager', quota_mgr)
+            cur_qm.record_abuse_violation(client_ip)
             raise HTTPException(403,'Session or CSRF check failed')
 
     @app.middleware('http')
@@ -251,7 +267,7 @@ def install_organization_routes(app,cfg,store):
             'X-Request-ID': req_id,
             'X-Error-Code': error_code
         }
-        v1_requested = bool(request.headers.get('x-request-id') or request.headers.get('idempotency-key') or request.headers.get('x-v1-schema'))
+        v1_requested = bool(request.headers.get('x-request-id') or request.headers.get('idempotency-key') or request.headers.get('x-v1-schema') or status_code == 429)
         if v1_requested:
             body = {
                 'detail': detail,
@@ -267,9 +283,17 @@ def install_organization_routes(app,cfg,store):
     async def http_error(request: Request, exc: HTTPException):
         code = ERROR_CODE_MAP.get(exc.status_code, 'HTTP_ERROR')
         if request.scope['path'] == ROOT or request.scope['path'].startswith(ROOT + '/'):
-            return error_response(request, exc.status_code, str(exc.detail), code)
+            resp = error_response(request, exc.status_code, str(exc.detail), code)
+            if exc.headers:
+                for k, v in exc.headers.items():
+                    resp.headers[k] = v
+            return resp
         req_id = getattr(request.state, 'request_id', 'req-unknown')
-        return JSONResponse({'detail': exc.detail}, status_code=exc.status_code, headers={'X-Request-ID': req_id})
+        resp = JSONResponse({'detail': exc.detail}, status_code=exc.status_code, headers={'X-Request-ID': req_id})
+        if exc.headers:
+            for k, v in exc.headers.items():
+                resp.headers[k] = v
+        return resp
 
     @app.exception_handler(ResourceNotFound)
     async def not_found(request: Request, exc):

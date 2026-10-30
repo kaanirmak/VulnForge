@@ -275,20 +275,40 @@ class Store:
              row['connection_id'],owner['organization_id'] if owner else None,row['installation_id']))
             return result.rowcount == 1
 
-    def claim(self):
+    def claim(self, *, max_concurrency_per_org: int | None = None):
         now = time.time()
         with self.conn() as c:
             self.begin(c)
-            row = c.execute("""SELECT * FROM jobs WHERE
-                (state='pending' AND available_at<=?) OR
-                (state='running' AND lease_until<?)
-                ORDER BY id LIMIT 1"""+ (" FOR UPDATE SKIP LOCKED" if self.backend=="postgresql" else ""), (now, now)).fetchone()
+            if max_concurrency_per_org is not None:
+                candidates = c.execute("""SELECT * FROM jobs WHERE
+                    (state='pending' AND available_at<=?) OR
+                    (state='running' AND lease_until<?)
+                    ORDER BY id LIMIT 25""" + (" FOR UPDATE SKIP LOCKED" if self.backend=="postgresql" else ""), (now, now)).fetchall()
+                selected = None
+                for cand in candidates:
+                    org_id = cand['organization_id']
+                    if org_id:
+                        active_cnt = c.execute(
+                            "SELECT COUNT(*) FROM jobs WHERE organization_id=? AND state='running' AND lease_until>=? AND id!=?",
+                            (org_id, now, cand['id'])
+                        ).fetchone()[0]
+                        if active_cnt >= max_concurrency_per_org:
+                            continue
+                    selected = cand
+                    break
+                row = selected
+            else:
+                row = c.execute("""SELECT * FROM jobs WHERE
+                    (state='pending' AND available_at<=?) OR
+                    (state='running' AND lease_until<?)
+                    ORDER BY id LIMIT 1""" + (" FOR UPDATE SKIP LOCKED" if self.backend=="postgresql" else ""), (now, now)).fetchone()
+
             if row:
-                token=uuid.uuid4().hex
+                token = uuid.uuid4().hex
                 c.execute("UPDATE jobs SET state='running', lease_until=?, attempts=attempts+1,claim_token=? WHERE id=?",
-                          (now+300,token,row['id']))
-                row=dict(row)
-                row.update(state='running',lease_until=now+300,attempts=row['attempts']+1,claim_token=token)
+                          (now + 300, token, row['id']))
+                row = dict(row)
+                row.update(state='running', lease_until=now + 300, attempts=row['attempts'] + 1, claim_token=token)
             c.execute("COMMIT")
             return dict(row) if row else None
 

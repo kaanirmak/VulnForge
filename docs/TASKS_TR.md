@@ -146,7 +146,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-084: Veri ve yedek şifrelemesi, anahtar erişimi ve müşteri veri silme görevlerini uygula.
 - [x] VF-085: Audit'i aktör/organizasyon/repo/iş kimliğiyle genişlet; log maskeleme ve operatör erişimini denetle.
 - [x] VF-086: Kuyruk lease yenileme/sahiplik kontrolü, stale-worker engeli, retry/backoff ve dead-letter akışını kur.
-- [ ] VF-087: Organizasyon başına eşzamanlılık, API/scan kotası, adil iş dağıtımı ve kötüye kullanım sınırları ekle.
+- [x] VF-087: Organizasyon başına eşzamanlılık, API/scan kotası, adil iş dağıtımı ve kötüye kullanım sınırları ekle.
 - [ ] VF-088: Event→job→scan→finding→PR korelasyonu; kuyruk yaşı, tarama süresi, kaynak hatası ve freshness metriklerini ekle.
 - [ ] VF-089: Yedek/geri yükleme tatbikatı, RPO/RTO, dağıtım rollback'i ve felaket kurtarma runbook'u hazırla.
 - [ ] VF-090: Anahtar sızıntısı, yetkisiz erişim, feed kesintisi, PR spam ve güvenlik olayı müdahale/alarm akışlarını hazırla.
