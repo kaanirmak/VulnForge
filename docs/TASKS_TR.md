@@ -188,7 +188,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `EnterpriseSSO` (`vulnforge/sso.py`) ile kurumsal OIDC JWT doğrulama, IdP grup/rol haritalama (`group_role_mapping`), JIT (Just-In-Time) otomatik kullanıcı ve üyelik senkronizasyonu (`jit_provision_user`), SSO zorunluluğu politikası ve test paketi (`tests/test_enterprise_sso.py`) tamamlandı.
 - [x] VF-103: Self-hosted/on-prem kurulum paketini ve dışa kapalı çalışma modunu tamamla.
   `vulnforge/onprem.py` ile air-gapped / offline ağ izolasyon kontrolü (`validate_airgapped_isolation`), çevrimdışı tehdit istihbaratı paketi yükleme (`load_offline_advisories_bundle`), self-hosted Docker Compose manifest üreticisi (`generate_onprem_compose`), operasyonel kılavuz ([docs/ONPREM_AIRGAPPED_SETUP_TR.md](docs/ONPREM_AIRGAPPED_SETUP_TR.md)) ve test paketi (`tests/test_onprem_airgapped.py`) tamamlandı.
-- [ ] VF-104: Java/.NET ve diğer ekosistemler, container/image SBOM ve provenance kapsamını genişlet.
+- [x] VF-104: Java/.NET ve diğer ekosistemler, container/image SBOM ve provenance kapsamını genişlet.
+  `vulnforge/extended_ecosystems.py` ile Java (Maven `pom.xml`, Gradle `build.gradle`), .NET (NuGet `.csproj`), CycloneDX ve SPDX JSON konteyner imajı SBOM bileşen ve SHA-256 hash ayrıştırıcıları ile test paketi (`tests/test_extended_ecosystems_and_sbom.py`) tamamlandı.
 - [ ] VF-105: Kanıta dayalı reachability ve runtime exposure sinyalleri ekle.
 - [ ] VF-106: Açık izinli, varsayılan kapalı LLM triage/patch; yerel ve uzaktaki model seçeneklerini değerlendir.
 - [ ] VF-107: Modelden bağımsız tool/policy gate, yapılandırılmış çıktı ve prompt-injection/exfiltration değerlendirme seti kur.
