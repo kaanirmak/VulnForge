@@ -184,7 +184,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 
 - [x] VF-101: GitLab adapter'ı, OAuth/webhook ve MR/Pipeline entegrasyonu ekle.
   `GitLabAdapter` (`vulnforge/gitlab.py`) ile GitLab webhook (`Push Hook`, `Merge Request Hook`, `Pipeline Hook`), `X-GitLab-Token` imza doğrulaması, OAuth authorization URL oluşturma, MR bulgu raporlama notu ve test paketi (`tests/test_gitlab_adapter.py`) tamamlandı.
-- [ ] VF-102: Kurumsal OIDC/SSO ve gerekiyorsa otomatik kullanıcı/üyelik yönetimi ekle.
+- [x] VF-102: Kurumsal OIDC/SSO ve gerekiyorsa otomatik kullanıcı/üyelik yönetimi ekle.
+  `EnterpriseSSO` (`vulnforge/sso.py`) ile kurumsal OIDC JWT doğrulama, IdP grup/rol haritalama (`group_role_mapping`), JIT (Just-In-Time) otomatik kullanıcı ve üyelik senkronizasyonu (`jit_provision_user`), SSO zorunluluğu politikası ve test paketi (`tests/test_enterprise_sso.py`) tamamlandı.
 - [ ] VF-103: Self-hosted/on-prem kurulum paketini ve dışa kapalı çalışma modunu tamamla.
 - [ ] VF-104: Java/.NET ve diğer ekosistemler, container/image SBOM ve provenance kapsamını genişlet.
 - [ ] VF-105: Kanıta dayalı reachability ve runtime exposure sinyalleri ekle.
