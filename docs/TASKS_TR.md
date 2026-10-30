@@ -149,7 +149,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-087: Organizasyon başına eşzamanlılık, API/scan kotası, adil iş dağıtımı ve kötüye kullanım sınırları ekle.
 - [x] VF-088: Event→job→scan→finding→PR korelasyonu; kuyruk yaşı, tarama süresi, kaynak hatası ve freshness metriklerini ekle.
 - [x] VF-089: Yedek/geri yükleme tatbikatı, RPO/RTO, dağıtım rollback'i ve felaket kurtarma runbook'u hazırla.
-- [ ] VF-090: Anahtar sızıntısı, yetkisiz erişim, feed kesintisi, PR spam ve güvenlik olayı müdahale/alarm akışlarını hazırla.
+- [x] VF-090: Anahtar sızıntısı, yetkisiz erişim, feed kesintisi, PR spam ve güvenlik olayı müdahale/alarm akışlarını hazırla.
 
 ## J. Doğrulama ve ilk yayın — P0/P1 yayın kapıları
 
