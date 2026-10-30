@@ -65,7 +65,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   Snapshot/geçmiş ve tazelik API/ekran/export uyarıları (`vulnforge/freshness.py`), eksik envanterin geçerli baseline sayılmasını engelleyen kurallar ve doğrulama testleri (`tests/test_freshness.py`) tamamlandı. [Kanıt](EVIDENCE_FRESHNESS_TR.md).
 - [x] VF-035: Sonuç yüklemek için OIDC doğrulaması veya eşdeğer kısa ömürlü kimlik mekanizması kur.
   GitHub Actions OIDC JWT doğrulaması (`vulnforge/runner_oidc.py`), JWKS doğrulama, metadata-only App kontrolü, yerel policy/API ve 46 protokol testi (`tests/test_runner_oidc.py`) ile tamamlandı. [Detaylar](RUNNER_IDENTITY_TR.md).
-- [ ] VF-036: Yüklemede repo, organizasyon, SHA, workflow kimliği, güvenilen workflow ref'i ve izin kapsamını doğrula; beyanı tek başına kanıt sayma.
+- [x] VF-036: Yüklemede repo, organizasyon, SHA, workflow kimliği, güvenilen workflow ref'i ve izin kapsamını doğrula; beyanı tek başına kanıt sayma.
+  `vulnforge/runner_intake.py` yükleme denetleyicisi ile repo, organizasyon kimliği, SHA, workflow kimliği ve SHA-pinned güvenilir workflow referansı doğrulaması ve entegrasyon testleri (`tests/test_runner_intake.py`, `tests/test_runner_upload.py`) tamamlandı.
 - [x] VF-037: Fork PR ve güvenilmeyen workflow kodunun sır/ayrıcalıklı yükleme yetkisi almasını engelle.
 - [x] VF-038: Sürümlü sonuç şeması, boyut limitleri, kaynak/sır reddi ve tekrar yükleme dedup'u ekle.
 - [x] VF-039: Action/CLI bağımlılıklarını sabitle; değişmez sürüm referansları, checksum ve dağıtım kanıtı üret.
