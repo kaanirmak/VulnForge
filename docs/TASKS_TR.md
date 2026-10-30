@@ -50,7 +50,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-025: Kullanıcının erişebildiği kurulum ve repoları listele; repo seçimi/senkronizasyonu ekle.
   Kullanıcının erişebildiği GitHub kurulumları (`/user/installations`) ve repoları (`/user/installations/{id}/repositories`) sayfalanmış şekilde listeleyen, admin yetkilerini doğrulayan repo seçimi ve senkronizasyon akışı tamamlandı.
 - [x] VF-026: Kullanıcıya istenen izinleri, tarama modunu ve veri paylaşımını onay öncesinde göster.
-- [ ] VF-027: İlk tarama/ilk envanter akışını kur; bekleyen ve hatalı kurulum durumlarını göster.
+- [x] VF-027: İlk tarama/ilk envanter akışını kur; bekleyen ve hatalı kurulum durumlarını göster.
+  `OrganizationData.project_health` ve UI entegrasyonu ile bağlantı durumu (`connected` / `pending`), eksik envanter uyarıları (`evidence_status`), runner yapılandırma durumu ve hatalı kurulum göstergeleri tamamlandı.
 - [x] VF-028: Repo ekleme/çıkarma, uninstall, suspend/unsuspend ve yetki değişimini uzlaştır.
 - [x] VF-029: Süresi kısa, repo/izin kapsamı daraltılmış installation token kullanımını uygula.
 - [x] VF-030: İlk/silinecek dal, force-push, büyük push ve kaçırılan teslimatları backfill ile uzlaştır.
