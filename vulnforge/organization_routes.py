@@ -561,4 +561,18 @@ def install_organization_routes(app,cfg,store):
         try: return await data.test_notification_channel(channel_id)
         except Exception as exc: raise HTTPException(502,f'Notification test failed: {str(exc)}') from None
 
+    @router.get('/telemetry/metrics')
+    async def get_metrics(data=Depends(scoped)):
+        from .telemetry import collect_operational_metrics
+        return collect_operational_metrics(store)
+
+    @router.get('/telemetry/traces/{correlation_id}')
+    async def get_trace(correlation_id:str, data=Depends(scoped)):
+        from .telemetry import CorrelationTracer
+        tracer = CorrelationTracer(store)
+        trace = tracer.get_trace(correlation_id)
+        if not trace:
+            raise HTTPException(404, 'Correlation trace not found')
+        return trace
+
     app.include_router(router)
