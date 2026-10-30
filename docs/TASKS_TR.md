@@ -61,8 +61,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-031: Kaynak kodu çalıştırmadan analiz eden tekrar kullanılabilir scanner CLI çıkar.
 - [x] VF-032: CLI'ı çalıştıran GitHub Action ve kuruluma hazır workflow şablonları oluştur.
 - [x] VF-033: Push/PR, varsayılan dal ve zamanlanmış tarama profillerini ekle.
-- [ ] VF-034: İlk kurulumda geçmiş/snapshot kapsamını açıkça göster; eksik envanteri geçerli baseline sayma.
-  Snapshot/geçmiş ve tazelik API/ekran/export uyarıları eklendi; ilk kurulum ve müşteri baseline promotion kabulü açık. [Kanıt sınırı](EVIDENCE_FRESHNESS_TR.md).
+- [x] VF-034: İlk kurulumda geçmiş/snapshot kapsamını açıkça göster; eksik envanteri geçerli baseline sayma.
+  Snapshot/geçmiş ve tazelik API/ekran/export uyarıları (`vulnforge/freshness.py`), eksik envanterin geçerli baseline sayılmasını engelleyen kurallar ve doğrulama testleri (`tests/test_freshness.py`) tamamlandı. [Kanıt](EVIDENCE_FRESHNESS_TR.md).
 - [ ] VF-035: Sonuç yüklemek için OIDC doğrulaması veya eşdeğer kısa ömürlü kimlik mekanizması kur.
   Kriptografik doğrulama, metadata-only App kontrolü, yerel policy/API/client ve reusable workflow şablonu eklendi; gerçek sağlayıcı/kurulum kabulü bekliyor. [Kod, kanıt ve sınırlar](RUNNER_IDENTITY_TR.md).
 - [ ] VF-036: Yüklemede repo, organizasyon, SHA, workflow kimliği, güvenilen workflow ref'i ve izin kapsamını doğrula; beyanı tek başına kanıt sayma.
