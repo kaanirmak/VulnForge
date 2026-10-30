@@ -41,7 +41,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 ## C. GitHub bağlantısı ve kurulum deneyimi — P0
 
 - [x] VF-021: Uygulama kaydı/manifestini ve yalnız gereken GitHub izinlerini hazırla.
-- [ ] VF-022: Herkese açık App kurulumu, alan adı, HTTPS ve webhook adreslerini yapılandır.
+- [x] VF-022: Herkese açık App kurulumu, alan adı, HTTPS ve webhook adreslerini yapılandır.
+  `vulnforge/github_app.py` ile herkese açık App manifesti, katı HTTPS doğrulaması, webhook adresi (`/github/webhook`) ve OAuth callback rotaları (`/auth/github/callback` ve `/auth/github/connect/callback`) yapılandırması tamamlandı.
 - [ ] VF-023: Panelde GitHub ile giriş ve Proje bağla akışını oluştur.
 - [ ] VF-024: Kurulum dönüşünü oturum ve kurulum yetkisiyle doğrula; rastgele installation_id ile hesap bağlanmasını engelle.
 - [ ] VF-025: Kullanıcının erişebildiği kurulum ve repoları listele; repo seçimi/senkronizasyonu ekle.
