@@ -44,6 +44,8 @@ def create_app(cfg: Config | None = None, store: Store | None = None):
     install_organization_routes(app,cfg,store)
     from .runner_routes import install_runner_routes
     install_runner_routes(app,cfg,store)
+    from .network import SecurityHeadersMiddleware
+    app.add_middleware(SecurityHeadersMiddleware, cfg=cfg)
 
     async def admin(request:Request,authorization: str | None = Header(default=None)):
         if not cfg.admin_token and not cfg.operator_credentials:

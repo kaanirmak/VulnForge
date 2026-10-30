@@ -75,8 +75,11 @@ class Config:
         if self.operator_report_token and self.operator_report_token in tokens:
             raise ValueError('Report intake requires an independent credential')
         for url in (self.database_url,self.customer_database_url,self.worker_database_url):
-            if url and not url.startswith(('postgresql://','postgres://')):
-                raise ValueError('Database URL must use a PostgreSQL connection URI')
+            if url:
+                if not url.startswith(('postgresql://','postgres://')):
+                    raise ValueError('Database URL must use a PostgreSQL connection URI')
+                from .network import validate_database_network_isolation
+                validate_database_network_isolation(url, self.environment)
         configured_urls=[url for url in (self.database_url,self.customer_database_url,self.worker_database_url) if url]
         if len(configured_urls)!=len(set(configured_urls)):
             raise ValueError('Operator, customer and worker database URLs must use distinct roles')

@@ -68,15 +68,15 @@ def test_cross_environment_isolation_verification():
     )
     staging = Config(
         environment='staging',
-        database_url='postgresql://staging@staging-db:5432/vf_staging',
+        database_url='postgresql://staging@staging-db.internal:5432/vf_staging',
         webhook_secret='staging_secret_key_distinct_value_123',
         admin_token='staging_admin_token_distinct_val'
     )
     prod = Config(
         environment='production',
-        database_url='postgresql://op@prod-db:5432/vf_prod',
-        customer_database_url='postgresql://cust@prod-db:5432/vf_prod',
-        worker_database_url='postgresql://work@prod-db:5432/vf_prod',
+        database_url='postgresql://op@prod-db.internal:5432/vf_prod',
+        customer_database_url='postgresql://cust@prod-db.internal:5432/vf_prod',
+        worker_database_url='postgresql://work@prod-db.internal:5432/vf_prod',
         webhook_secret='super_secure_webhook_secret_32_chars_prod!',
         admin_token='prod_admin_secret_token_at_least_32_chars_long',
         github_oauth_client_id='prod-oauth-id',
@@ -94,7 +94,7 @@ def test_cross_environment_isolation_verification():
     # Staging sharing production database URL
     leak_db_staging = Config(
         environment='staging',
-        database_url='postgresql://op@prod-db:5432/vf_prod',
+        database_url='postgresql://op@prod-db.internal:5432/vf_prod',
         webhook_secret='staging_secret_key_distinct_value_123'
     )
     with pytest.raises(ValueError, match="share the same database_url"):
@@ -106,7 +106,7 @@ def test_cross_environment_isolation_verification():
     # Staging sharing production webhook secret
     leak_secret_staging = Config(
         environment='staging',
-        database_url='postgresql://staging@staging-db:5432/vf_staging',
+        database_url='postgresql://staging@staging-db.internal:5432/vf_staging',
         webhook_secret='super_secure_webhook_secret_32_chars_prod!'
     )
     with pytest.raises(ValueError, match="share the same webhook_secret"):
