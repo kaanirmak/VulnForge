@@ -663,6 +663,14 @@ class OrganizationData:
         from .identity import Identities
         return Identities(self.store).remove_repository_ownership(self.organization_id, repo, self.user_id)
 
+    def purge_data(self) -> dict:
+        with self.store.conn() as c:
+            role_row = c.execute('SELECT role FROM memberships WHERE organization_id=? AND user_id=?',
+                                 (self.organization_id, self.user_id)).fetchone()
+            if not role_row or role_row['role'] != 'org_admin':
+                raise PermissionError('Organization administrator permission required for data purge')
+        return self.store.purge_organization(self.organization_id, self.user_id)
+
     def approve_patch(self, repo: str, plan_id: str, baseline_sha: str, diff_sha256: str) -> dict:
         with self.access('finding.triage') as c:
             self._repo(c, repo)

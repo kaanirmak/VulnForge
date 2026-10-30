@@ -1158,3 +1158,52 @@ class Store:
                 self.enqueue("dependency_audit", r['full_name'], {},
                              f"audit:{r['full_name']}:{int(now//interval)}")
         return len(rows)
+
+    def purge_organization(self, organization_id: str, actor_id: str = 'admin') -> dict:
+        """Completely purge all tenant data, repositories, findings, inventories, scans, and memberships for an organization."""
+        with self.transaction(), self.conn() as c:
+            org_row = c.execute('SELECT id, name FROM organizations WHERE id=?', (organization_id,)).fetchone()
+            if not org_row:
+                raise LookupError('Organization not found')
+
+            repo_rows = c.execute('SELECT repo FROM repository_ownership WHERE organization_id=?', (organization_id,)).fetchall()
+            repos = [r['repo'] for r in repo_rows]
+
+            for repo in repos:
+                c.execute('DELETE FROM findings WHERE repo=?', (repo,))
+                c.execute('DELETE FROM dependency_inventory WHERE repo=?', (repo,))
+                c.execute('DELETE FROM advisory_impacts WHERE repo=?', (repo,))
+                c.execute('DELETE FROM remediations WHERE repo=?', (repo,))
+                scan_rows = c.execute('SELECT id FROM scans WHERE repo=?', (repo,)).fetchall()
+                for s in scan_rows:
+                    c.execute('DELETE FROM scan_findings WHERE scan_id=?', (s['id'],))
+                c.execute('DELETE FROM scans WHERE repo=?', (repo,))
+                if self.backend == 'sqlite':
+                    try:
+                        c.execute('DELETE FROM patch_validations WHERE repo=?', (repo,))
+                        c.execute('DELETE FROM patch_approvals WHERE repo=?', (repo,))
+                    except Exception:
+                        pass
+                c.execute('DELETE FROM repository_ownership WHERE repo=? AND organization_id=?', (repo, organization_id))
+                c.execute('DELETE FROM remediation_policies WHERE repo=? AND organization_id=?', (repo, organization_id))
+
+            c.execute('DELETE FROM memberships WHERE organization_id=?', (organization_id,))
+            c.execute('DELETE FROM invitations WHERE organization_id=?', (organization_id,))
+            c.execute('DELETE FROM connection_intents WHERE organization_id=?', (organization_id,))
+            if self.backend == 'sqlite':
+                try:
+                    c.execute('DELETE FROM notification_channels WHERE organization_id=?', (organization_id,))
+                except Exception:
+                    pass
+            c.execute('DELETE FROM organizations WHERE id=?', (organization_id,))
+
+            self.audit_event(
+                'org:' + organization_id, None, actor_id, 'organization_data_purged',
+                {'organization_id': organization_id, 'purged_repos': repos}
+            )
+
+            return {
+                'status': 'purged',
+                'organization_id': organization_id,
+                'purged_repositories': repos
+            }
