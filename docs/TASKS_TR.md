@@ -197,7 +197,7 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-107: Modelden bağımsız tool/policy gate, yapılandırılmış çıktı ve prompt-injection/exfiltration değerlendirme seti kur.
   `vulnforge/llm_guardrails.py` ile modelden bağımsız araç yürütme ve dizin aşımı/komut enjeksiyonu denetimi (`PolicyGate`), katı JSON şema doğrulayıcısı (`StructuredOutputValidator`), adversarial prompt injection ve markdown/veri sızıntısı dedektörü (`InjectionExfiltrationDetector`) ile test paketi (`tests/test_prompt_injection_guardrails.py`) tamamlandı.
 - [x] VF-108: Tüm CI, policy, güncel SHA ve onay kapıları tamamlandıktan sonra dar kapsamlı koşullu automerge pilotu değerlendir.
-- [ ] VF-109: Kullanım/plan limitleri, bütçe görünürlüğü ve gerekiyorsa ödeme/faturalandırma ekle.
+- [x] VF-109: Kullanım/plan limitleri, bütçe görünürlüğü ve gerekiyorsa ödeme/faturalandırma ekle.
 - [ ] VF-110: Veri bölgesi, ayrı müşteri ortamı/anahtarı ve kurumsal denetim/uyumluluk ihtiyaçlarını ürünleştir.
 
 ## Bağımlılık ve çıkış kapıları
