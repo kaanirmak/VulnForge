@@ -34,7 +34,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-017: Veritabanında RLS veya eşdeğer izolasyon uygula; uygulama bağlantısının korumayı aşmasını engelle.
 - [x] VF-018: Kuyruk işleri, cache, dosyalar ve arka plan görevlerinde aynı organizasyon sınırını uygula.
   Bağlantı/organizasyon anlık görüntüsü, claim fencing, iptal sonrası yazma engeli, repo/scan kapsamlı worker arayüzü, iş başına istemci/cache, repo sınırlı GitHub token isteği, ayrı kısıtlı PostgreSQL `WorkerStore` DB rolü + iş kanıtı RLS politikaları ve organizasyon-bazlı (`org:<org_id>`) özel advisory katalog namespace'i tamamlandı. [Alt kontrol listesi ve kanıt](QUEUE_ISOLATION_TR.md).
-- [ ] VF-019: Davet, üyelikten çıkarma ve repo erişimi kaybında oturum/yetkiyi güncelle.
+- [x] VF-019: Davet, üyelikten çıkarma ve repo erişimi kaybında oturum/yetkiyi güncelle.
+  Üyelik rolü değişikliği veya üyelikten çıkarma anında kullanıcının tüm oturumlarını anında silen (`DELETE FROM user_sessions`), bekleyen davetleri iptal eden (`_revoke_authority`) ve repo sahipliği silindiğinde kiracı erişimini anında sonlandıran mekanizma ve test paketi (`tests/test_membership_revocation_session_invalidation.py`) ile tamamlandı.
 - [x] VF-020: Ortak admin token'ını müşteri akışından kaldır; ayrı ve denetlenen operatör erişimi oluştur.
 
 ## C. GitHub bağlantısı ve kurulum deneyimi — P0
