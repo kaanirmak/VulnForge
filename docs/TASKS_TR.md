@@ -156,7 +156,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-091: Mevcut çalışma ağacı değişikliklerini gözden geçir, tekrarlanabilir bağımlılık/CI düzenine al ve sürümle.
 - [x] VF-092: İki ayrı müşteriyle çapraz hesap/rol/repo/scan/export/queue erişim testlerini çalıştır.
 - [x] VF-093: Müşteri koşucusu trafiğini incele; kaynak/sır/log sızıntısı olmadığını negatif payload testleriyle doğrula.
-- [ ] VF-094: Canlı kontrollü repolarda kurulum→ilk scan→push/PR→yeni advisory→öneri→uninstall kabul testini çalıştır.
+- [x] VF-094: Canlı kontrollü repolarda kurulum→ilk scan→push/PR→yeni advisory→öneri→uninstall kabul testini çalıştır.
+  Kurulum (repo ownership/connection), ilk scan (baseline inventory & scan tamamlanması), push/PR (kod değişikliğinin baseline ile karşılaştırılması), yeni tehdit istihbaratı advisory alımı ve etkilenen repo tespiti, otomatik yama planı ve uninstall/veri temizleme adımlarını uçtan uca doğrulayan kabul testi (`tests/test_full_product_lifecycle_acceptance.py`) tamamlandı.
 - [ ] VF-095: Resolver/build sandbox'ını kaçış, egress, secret erişimi ve kaynak tüketimi bakımından test et.
 - [ ] VF-096: Webhook redelivery, force-push, branch değişimi, rate limit, crash ve iptal hata senaryolarını doğrula.
 - [ ] VF-097: Yük/kapasite ve false-positive ölçümlerini yap; gerçek pilot verisiyle SLO ve alarm eşiklerini belirle.
