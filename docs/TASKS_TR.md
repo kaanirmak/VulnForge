@@ -190,7 +190,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   `vulnforge/onprem.py` ile air-gapped / offline ağ izolasyon kontrolü (`validate_airgapped_isolation`), çevrimdışı tehdit istihbaratı paketi yükleme (`load_offline_advisories_bundle`), self-hosted Docker Compose manifest üreticisi (`generate_onprem_compose`), operasyonel kılavuz ([docs/ONPREM_AIRGAPPED_SETUP_TR.md](docs/ONPREM_AIRGAPPED_SETUP_TR.md)) ve test paketi (`tests/test_onprem_airgapped.py`) tamamlandı.
 - [x] VF-104: Java/.NET ve diğer ekosistemler, container/image SBOM ve provenance kapsamını genişlet.
   `vulnforge/extended_ecosystems.py` ile Java (Maven `pom.xml`, Gradle `build.gradle`), .NET (NuGet `.csproj`), CycloneDX ve SPDX JSON konteyner imajı SBOM bileşen ve SHA-256 hash ayrıştırıcıları ile test paketi (`tests/test_extended_ecosystems_and_sbom.py`) tamamlandı.
-- [ ] VF-105: Kanıta dayalı reachability ve runtime exposure sinyalleri ekle.
+- [x] VF-105: Kanıta dayalı reachability ve runtime exposure sinyalleri ekle.
+  `vulnforge/reachability.py` AST çağrı grafı ve sembol analizi ile `reachable`, `unreachable` ve `runtime_exposed` (HTTP rota/endpoint maruziyeti) sinyalleri, bağlamsal önem derecesi (contextual severity) ayarlaması ve test paketi (`tests/test_reachability_signals.py`) tamamlandı.
 - [ ] VF-106: Açık izinli, varsayılan kapalı LLM triage/patch; yerel ve uzaktaki model seçeneklerini değerlendir.
 - [ ] VF-107: Modelden bağımsız tool/policy gate, yapılandırılmış çıktı ve prompt-injection/exfiltration değerlendirme seti kur.
 - [ ] VF-108: Tüm CI, policy, güncel SHA ve onay kapıları tamamlandıktan sonra dar kapsamlı koşullu automerge pilotu değerlendir.
