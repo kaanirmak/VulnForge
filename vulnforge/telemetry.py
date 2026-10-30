@@ -169,7 +169,7 @@ def collect_operational_metrics(store: Any) -> Dict[str, Any]:
 
     with store.conn() as c:
         # 1. Queue Metrics
-        jobs = c.execute("SELECT id, state, available_at, lease_until FROM jobs").fetchall()
+        jobs = c.execute("SELECT id, state, available_at, lease_until, last_error FROM jobs").fetchall()
         pending_jobs = [j for j in jobs if j["state"] == "pending"]
         running_jobs = [j for j in jobs if j["state"] == "running"]
         failed_jobs = [j for j in jobs if j["state"] == "failed"]
