@@ -511,6 +511,11 @@ def install_organization_routes(app,cfg,store):
     async def scans(repo:str|None=None,limit:int=Query(50,ge=1,le=100),data=Depends(scoped)):
         return data.rows('scans',repo,limit)
 
+    @router.post('/scans/run',dependencies=[Depends(csrf)],status_code=202)
+    async def run_scan(repo:str=Query(...),data=Depends(scoped)):
+        try: return {'queued':bool(data.request_scan(repo))}
+        except LookupError: raise HTTPException(404,'Repository not found') from None
+
     @router.get('/scans/{scan_id}')
     async def scan(scan_id:str,data=Depends(scoped)): return data.scan(scan_id)
 

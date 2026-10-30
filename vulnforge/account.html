@@ -468,7 +468,7 @@ byId('run-scan').addEventListener('click',async()=>{
   const repo=projectItems[0]?.full_name;
   if(!repo)return;
   button.disabled=true;byId('export-status').textContent='Tarama kuyruğa alınıyor…';
-  try{const result=await mutate('/api/rescan?repo='+encodeURIComponent(repo),null);byId('export-status').textContent=result.queued?'Tarama başlatıldı. Sonuçlar hazır olduğunda liste yenilenecek.':'Bu proje için zaten bekleyen bir tarama var.';await loadWorkspace();}
+  try{const result=await mutate('/api/v1/organizations/'+encodeURIComponent(byId('organization').value)+'/scans/run?repo='+encodeURIComponent(repo),null);byId('export-status').textContent=result.queued?'Tarama başlatıldı. Sonuçlar hazır olduğunda liste yenilenecek.':'Bu proje için zaten bekleyen bir tarama var.';await loadWorkspace();}
   catch{byId('export-status').textContent='Tarama başlatılamadı. Proje bağlantısını ve yönetici yetkini kontrol et.';button.disabled=false;}
 });
 for(const button of document.querySelectorAll('[data-page]'))button.addEventListener('click',()=>setPage(button.dataset.page));

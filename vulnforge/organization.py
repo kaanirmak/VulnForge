@@ -125,6 +125,11 @@ class OrganizationData:
                 'finding_count': finding_count
             }
 
+    def request_scan(self, repo):
+        with self.access('project.read') as c:
+            self._repo(c, repo)
+            return self.store.enqueue('dependency_audit', repo, {}, f'manual:{repo}:{int(time.time())}')
+
     def project_health(self, repo: str) -> dict:
         with self.access('project.read') as c:
             self._repo(c, repo)
