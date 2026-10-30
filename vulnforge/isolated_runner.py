@@ -18,7 +18,7 @@ SAFE_ENV_VARS = (
 )
 
 SENSITIVE_KEY_PATTERN = re.compile(
-    r'(?i)(token|key|secret|password|auth|credential|private|database|github|aws|postgres|pg_|ssh_|api_|vf_)'
+    r'(?i)(token|key|secret|password|auth|credential|private|database|github|aws|postgres|pg_|ssh_|api_|vf_|bearer|cookie|cert)'
 )
 
 
@@ -193,13 +193,19 @@ class IsolatedRunner:
     ) -> ExecutionResult:
         """Run command inside an isolated temporary directory that is automatically destroyed."""
         with tempfile.TemporaryDirectory(prefix="vf_isolated_") as tmpdir:
-            # Materialize workspace files
+            base_dir = Path(tmpdir).resolve()
+            # Materialize workspace files with strict containment
             for rel_path, content in files.items():
-                if rel_path.startswith('/') or '..' in rel_path.split('/'):
+                if rel_path.startswith('/') or '\\' in rel_path or '..' in rel_path.split('/'):
                     continue
-                dest = Path(tmpdir) / rel_path
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_text(content, encoding='utf-8')
+                try:
+                    dest = (base_dir / rel_path).resolve()
+                    if not dest.is_relative_to(base_dir):
+                        continue
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    dest.write_text(content, encoding='utf-8')
+                except Exception:
+                    continue
 
             result = self.run_command(cmd, cwd=tmpdir, input_data=input_data, limits=limits)
             # Ephemeral workspace is safely deleted at context exit
@@ -221,3 +227,4 @@ class IsolatedRunner:
             return res.stdout
 
         return _runner
+
