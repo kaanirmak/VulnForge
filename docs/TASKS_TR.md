@@ -166,7 +166,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
   Pilot veri seti ve sentetik yük altında SBOM/envanter ayrıştırma hızı (> 2.500 bağımlılık/sn), webhook alım gecikmesi (P95 < 20ms, P99 < 30ms, SLO: <= 200ms), semantik sürüm eşleme hassasiyeti ve %0.0 false-positive oranını kanıtlayan test paketi (`tests/test_benchmarks_and_slo.py`) ile kuyruk yığılması, dead-letter, hata oranı ve istihbarat gecikmesi operasyonel alarm eşiklerini belirleyen rapor ([docs/BENCHMARKS_SLO_TR.md](docs/BENCHMARKS_SLO_TR.md)) tamamlandı.
 - [x] VF-098: Bağımsız güvenlik incelemesi ve yetkilendirilmiş penetrasyon testi yaptır; kritik bulguları kapat.
   OWASP API Security ve ASVS Seviye 2 standartlarında bağımsız güvenlik incelemesi ve penetrasyon testi raporu ([docs/SECURITY_AUDIT_REPORT_TR.md](docs/SECURITY_AUDIT_REPORT_TR.md)) hazırlandı; SQL enjeksiyonu, kurcalanmış webhook imzaları, BOLA/IDOR çapraz kiracı izolasyonu ve operatör denetimi gerekçe zorunluluğunu doğrulayan penetrasyon test paketi (`tests/test_security_audit_and_pentest.py`) ile kritik ve yüksek seviyeli tüm bulgular kapatıldı.
-- [ ] VF-099: App/Action kurulumu, izin açıklamaları, müşteri koşucusu, kaldırma ve sorun giderme belgelerini tamamla.
+- [x] VF-099: App/Action kurulumu, izin açıklamaları, müşteri koşucusu, kaldırma ve sorun giderme belgelerini tamamla.
+  GitHub App ve GitHub Action (müşteri koşucusu / customer runner) kurulum rehberi, least-privilege izin gerekçeleri (metadata, pull requests, checks vs. contents no-access), müşteri verisini kalıcı silme (GDPR purge) ve webhook/oran sınırı/şema doğrulama sorun giderme kılavuzunu içeren kapsamlı operasyon belgesi ([docs/CUSTOMER_OPERATIONS_GUIDE_TR.md](docs/CUSTOMER_OPERATIONS_GUIDE_TR.md)) tamamlandı.
 - [ ] VF-100: Kapalı pilot, kabul raporu, destek süreci ve genel yayın kontrolünü tamamla; dış yayımlama adımlarını somut çıktı üzerinden ayrıca onaylat.
 
 ## K. Sonraki ürün fazları — P2
