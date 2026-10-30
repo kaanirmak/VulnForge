@@ -27,7 +27,8 @@ Yerelde mevcut: imzalı webhook ve transaction/dedup, kuyruk/worker, SHA'ya bağ
 - [x] VF-012: Kullanıcı, organizasyon, üyelik ve repo sahipliği modelini oluştur.
 - [x] VF-013: GitHub ile giriş; state, callback doğrulaması ve uygulanabilir güvenli OAuth kontrollerini ekle.
   PKCE S256 challenge ve verifier doğrulaması, tek kullanımlık state özetleri, sabit origin callback doğrulaması, provider access token saklamama ve 40 yerel protokol testi (`tests/test_auth.py`) ile tamamlandı. [Detaylar](GITHUB_LOGIN_TR.md).
-- [ ] VF-014: Güvenli oturum, çıkış, süre sonu, CSRF ve cookie kontrollerini ekle.
+- [x] VF-014: Güvenli oturum, çıkış, süre sonu, CSRF ve cookie kontrollerini ekle.
+  `__Host-` / `vf_local_` Secure HttpOnly SameSite=Lax çerezleri, 8 saatlik mutlak ve 30 dakikalık boşta kalma süre sonu, Origin ve CSRF doğrulamalı `POST /auth/logout` çıkışı ve oturum rotasyonu tamamlandı.
 - [x] VF-015: Org Admin, Maintainer, Analyst, Viewer/Auditor rollerini uygula.
 - [x] VF-016: Repo, scan, finding, impact, öneri ve export sorgularını organizasyon kapsamına bağla.
 - [x] VF-017: Veritabanında RLS veya eşdeğer izolasyon uygula; uygulama bağlantısının korumayı aşmasını engelle.
