@@ -494,9 +494,16 @@ def install_organization_routes(app,cfg,store):
         return {'items':data.advisories(limit)}
 
     @router.get('/audit/events')
-    async def audit(repo:str|None=None,limit:int=Query(50,ge=1,le=100),
-                    cursor:int=Query(0,ge=0),data=Depends(scoped)):
-        return data.audit(repo,cursor,limit)
+    async def audit(
+        repo: str | None = None,
+        actor: str | None = None,
+        action: str | None = None,
+        job_id: str | None = None,
+        limit: int = Query(50, ge=1, le=100),
+        cursor: int = Query(0, ge=0),
+        data = Depends(scoped),
+    ):
+        return data.audit(repo=repo, cursor=cursor, limit=limit, actor=actor, action=action, job_id=job_id)
 
     @router.get('/notifications/channels')
     async def notification_channels(limit:int=Query(50,ge=1,le=100),cursor:int=Query(0,ge=0),data=Depends(scoped)):

@@ -1129,10 +1129,41 @@ class Store:
                     c.execute("UPDATE findings SET status='open' WHERE id=?", (r['id'],))
                     self.audit_event(r['repo'],r['id'],'system','suppression_expired',{})
 
-    def audit_event(self, repo, finding_id, actor, action, details):
+    def audit_event(
+        self,
+        repo,
+        finding_id,
+        actor,
+        action,
+        details,
+        *,
+        organization_id=None,
+        job_id=None,
+        correlation_id=None,
+        client_ip=None,
+        operator_justification=None,
+    ):
+        from vulnforge.audit import mask_sensitive_audit_data
+        enriched = dict(details) if isinstance(details, dict) else {'data': details}
+        if organization_id is not None and 'organization_id' not in enriched:
+            enriched['organization_id'] = organization_id
+        if job_id is not None and 'job_id' not in enriched:
+            enriched['job_id'] = job_id
+        if correlation_id is not None and 'correlation_id' not in enriched:
+            enriched['correlation_id'] = correlation_id
+        if client_ip is not None and 'client_ip' not in enriched:
+            enriched['client_ip'] = client_ip
+        if operator_justification is not None and 'operator_justification' not in enriched:
+            enriched['operator_justification'] = operator_justification
+
+        masked = mask_sensitive_audit_data(enriched)
+        now = time.time()
         with self.conn() as c:
-            c.execute('INSERT INTO audit_events(repo,finding_id,actor,action,details,created_at) VALUES(?,?,?,?,?,?)',
-                      (repo,finding_id,actor,action,json.dumps(details),time.time()))
+            c.execute(
+                'INSERT INTO audit_events(repo,finding_id,actor,action,details,created_at) VALUES(?,?,?,?,?,?)',
+                (repo, finding_id, actor, action, json.dumps(masked), now),
+            )
+            return getattr(c, 'lastrowid', None)
 
     def triage(self, finding_id, status, reason, expires_at=None, *, actor='admin',organization_id=None):
         with self.transaction():

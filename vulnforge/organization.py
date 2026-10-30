@@ -1002,15 +1002,29 @@ class OrganizationData:
             return self.store.triage(finding_id,status,reason,expires_at,
                                     actor=self.user_id,organization_id=self.organization_id)
 
-    def audit(self,repo=None,cursor=0,limit=50):
+    def audit(self, repo=None, cursor=0, limit=50, *, actor=None, action=None, job_id=None):
         with self.access('audit.read') as c:
-            self._repo(c,repo)
-            sql='''SELECT x.* FROM audit_events x WHERE x.id>? AND EXISTS (
+            self._repo(c, repo)
+            sql = '''SELECT x.* FROM audit_events x WHERE x.id>? AND EXISTS (
                 SELECT 1 FROM memberships m WHERE m.organization_id=? AND m.user_id=?)
                 AND (x.repo=? OR EXISTS (SELECT 1 FROM repository_ownership o
                     WHERE o.repo=x.repo AND o.organization_id=?))'''
-            args=[cursor,self.organization_id,self.user_id,'organization:'+self.organization_id,self.organization_id]
-            if repo is not None: sql+=' AND x.repo=?';args.append(repo)
-            rows=c.execute(sql+' ORDER BY x.id LIMIT ?',args+[limit+1]).fetchall()
-            items=self.decode(rows[:limit],('details',))
-            return {'items':items,'next_cursor':items[-1]['id'] if len(rows)>limit else None}
+            args = [cursor, self.organization_id, self.user_id, 'organization:' + self.organization_id, self.organization_id]
+            if repo is not None:
+                sql += ' AND x.repo=?'
+                args.append(repo)
+            if actor is not None:
+                sql += ' AND x.actor LIKE ?'
+                args.append(f'%{actor}%')
+            if action is not None:
+                sql += ' AND x.action=?'
+                args.append(action)
+            sql += ' ORDER BY x.id LIMIT ?'
+            args.append(limit * 3 if job_id else limit + 1)
+            rows = c.execute(sql, tuple(args)).fetchall()
+            items = self.decode(rows, ('details',))
+            if job_id:
+                items = [item for item in items if isinstance(item.get('details'), dict) and item['details'].get('job_id') == job_id]
+            paginated = items[:limit]
+            next_cur = paginated[-1]['id'] if len(items) > limit else None
+            return {'items': paginated, 'next_cursor': next_cur}
