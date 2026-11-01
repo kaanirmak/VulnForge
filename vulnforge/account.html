@@ -31,7 +31,7 @@ dd{margin:4px 0 16px;overflow-wrap:anywhere;font-size:12px}.dialog-head>div{min-
 <section id="onboarding-checklist" class="panel onboarding" data-view="overview" hidden><svg class="icon"><use href="#i-shield"/></svg><div class="onboarding-content"><h2>Çalışma alanını hazırla</h2><p class="muted">Bağlantıdan ilk taramaya, güvenlik görünümünü adım adım oluştur.</p><div id="onboarding-steps" class="steps"></div></div></section>
 <div class="cards" role="region" aria-label="Güvenlik genel durumu" data-view="overview"><div class="metric"><div class="metric-label">Bağlı projeler<svg class="icon"><use href="#i-git"/></svg></div><span id="repo-count" class="number">—</span><span class="metric-note">Bu çalışma alanında</span></div><div class="metric"><div class="metric-label">Açık bulgular<svg class="icon"><use href="#i-shield"/></svg></div><span id="finding-count" class="number">—</span><span class="metric-note" id="finding-note">Kaydedilen taramalarda</span></div><div class="metric"><div class="metric-label">Etkilenen projeler<svg class="icon"><use href="#i-chart"/></svg></div><span id="impact-count" class="number">—</span><span class="metric-note">Mevcut açık kayıtlarına göre</span></div></div>
 <section data-view="overview projects" aria-labelledby="h-repos"><div class="section-heading"><h2 id="h-repos">Projelerin <span id="project-total" class="muted small"></span></h2><button id="refresh" class="ghost" aria-label="Verileri ve listeleri yenile" style="min-height:32px;padding:5px 10px;font-size:11px">↻ Yenile</button></div><div class="search-row" id="project-filters"><input id="project-search" type="search" aria-label="Bağlı projelerde ara" placeholder="Projelerde ara…"><span class="small muted">GitHub bağlantıları</span></div><div id="repositories" class="project-grid" tabindex="0" aria-label="Projeler tablosu"></div></section>
-<section class="panel" data-view="scans" role="region" aria-labelledby="h-scans"><div class="section-heading" style="margin-top:0"><div><h2 id="h-scans">Tarama geçmişi</h2><p class="view-description">Her rapor belirli bir değişikliğe ve tarama kapsamına aittir. Henüz tarama yoksa güvenlik değerlendirmesi yapılmış sayılmaz.</p></div><button id="run-scan" class="primary" disabled>Şimdi tara</button></div><div id="scan-progress" class="hint" role="status" aria-live="polite">Tarama kuyruğu hazır. Başlatmak için “Şimdi tara” düğmesine bas.</div><div id="scans" class="scroll" tabindex="0" aria-label="Taramalar tablosu"></div><p id="export-status" role="status" aria-live="polite" class="hint"></p></section>
+<section class="panel" data-view="scans" role="region" aria-labelledby="h-scans"><div class="section-heading" style="margin-top:0"><div><h2 id="h-scans">Tarama geçmişi</h2><p class="view-description">Her rapor belirli bir değişikliğe ve tarama kapsamına aittir. Henüz tarama yoksa güvenlik değerlendirmesi yapılmış sayılmaz.</p></div><div class="button-row"><label class="sr-label" for="scan-repo">Taranacak proje</label><select id="scan-repo" aria-label="Taranacak GitHub projesi" disabled><option value="">Önce proje bağla</option></select><button id="run-scan" class="primary" disabled>Şimdi tara</button></div></div><div id="scan-progress" class="hint" role="status" aria-live="polite">Tarama kuyruğu hazır. Başlatmak için “Şimdi tara” düğmesine bas.</div><div id="scans" class="scroll" tabindex="0" aria-label="Taramalar tablosu"></div><p id="export-status" role="status" aria-live="polite" class="hint"></p></section>
 <section class="panel" data-view="findings" role="region" aria-labelledby="h-findings"><div class="section-heading" style="margin-top:0"><h2 id="h-findings">Güvenlik bulguları</h2><label class="filters" for="severity"><span class="small muted">Önem derecesi</span><select id="severity"><option value="">Tümü</option><option value="critical">Kritik</option><option value="high">Yüksek</option><option value="medium">Orta</option><option value="low">Düşük</option><option value="info">Bilgi</option></select></label></div><p class="view-description">Bulguları taranan değişiklik ve kapsam bilgisiyle birlikte değerlendir.</p><div id="findings" class="scroll" tabindex="0" aria-label="Bulgular tablosu"></div><div id="finding-detail" hidden><h3>Bulgu kanıtı ve ayrıntıları</h3><div id="finding-detail-content"></div></div></section>
 <section class="panel" data-view="impacts" role="region" aria-labelledby="h-impacts"><h2 id="h-impacts">Proje etkisi</h2><p class="view-description">Güvenlik duyuruları, etkilenen bağımlılıklar ve güncelleme seçenekleri.</p><div id="impacts" class="scroll" tabindex="0" aria-label="Etkilenen projeler tablosu"></div></section>
 <section class="panel" data-view="remediations" role="region" aria-labelledby="h-remediations"><h2 id="h-remediations">Düzeltmeler ve PR durumu</h2><p class="view-description">İnsan onayı ve doğrulama gerektiren yama planları. Otomatik birleştirme kapalı.</p><div id="remediations" class="scroll" tabindex="0" aria-label="Düzeltmeler tablosu"></div></section>
@@ -85,6 +85,13 @@ function renderProjects(){
   }
   if(!rows.length)host.append(textElement('div',query?'Aramanla eşleşen proje yok.':'Henüz bağlı bir proje yok. İlk projeni GitHub üzerinden ekle.','empty-box'));
   if(!byId('new-project').hidden){const add=textElement('button','','new-project-card');add.append(textElement('span','+','plus'),textElement('strong','Yeni proje bağla'),textElement('small','GitHub depolarından birini seçerek çalışma alanına ekle.'));add.addEventListener('click',openProject);host.append(add);}
+}
+function renderScanProjects(){
+  const select=byId('scan-repo');const previous=select.value;select.replaceChildren();
+  if(!projectItems.length){select.append(textElement('option','Önce proje bağla'));select.value='';select.disabled=true;return;}
+  for(const repo of projectItems){const option=textElement('option',repo.full_name);option.value=repo.full_name;select.append(option);}
+  select.value=projectItems.some(repo=>repo.full_name===previous)?previous:projectItems[0].full_name;
+  select.disabled=false;
 }
 function renderChoices(){
   const select=byId('connection-repo');const previous=select.value;select.replaceChildren();
@@ -310,7 +317,7 @@ async function loadWorkspace(){
     byId('finding-count').textContent=overview.open_findings;
     byId('impact-count').textContent=overview.affected_projects;
 
-    projectItems=repos.items;renderProjects();
+    projectItems=repos.items;renderProjects();renderScanProjects();
     byId('project-total').textContent='('+repos.items.length+')';byId('nav-repo-count').textContent=overview.repositories;
     if(!scans.items.length){byId('finding-count').textContent='—';byId('impact-count').textContent='—';byId('finding-note').textContent='İlk tarama bekleniyor';}
     else byId('finding-note').textContent='Kaydedilen taramalarda';
@@ -322,7 +329,7 @@ async function loadWorkspace(){
     }),'Henüz tarama kaydı yok. Bağlı projelerin ilk koşucu raporu bekleniyor.');
     renderScanQueue(scanJobs.items);
     const scanButton=byId('run-scan');
-    scanButton.disabled=!isAdmin||!repos.items.length;
+    scanButton.disabled=!isAdmin||!byId('scan-repo').value;
     scanButton.title=isAdmin?'Bağlı projenin bağımlılık taramasını kuyruğa alır':'Bu işlem için çalışma alanı yöneticisi olmalısın';
     byId('finding-detail').hidden=true;
     table('findings',['Önem','Bulgu','Proje','Durum'],findings.items.map(f=>[
@@ -479,7 +486,7 @@ byId('refresh').addEventListener('click',loadWorkspace);
 byId('severity').addEventListener('change',loadWorkspace);
 byId('run-scan').addEventListener('click',async()=>{
   const button=byId('run-scan');
-  const repo=projectItems[0]?.full_name;
+  const repo=byId('scan-repo').value;
   if(!repo)return;
   button.disabled=true;byId('scan-progress').textContent='Tarama isteği kaydediliyor…';byId('export-status').textContent='Kuyruk durumu doğrulanıyor.';
   try{const result=await mutate('/api/v1/organizations/'+encodeURIComponent(byId('organization').value)+'/scans/run?repo='+encodeURIComponent(repo),null);byId('export-status').textContent=result.queued?'Tarama isteği kuyruğa alındı. Runner işi aldığında durum güncellenecek.':'Bu proje için zaten bekleyen bir tarama var.';await loadWorkspace();}
