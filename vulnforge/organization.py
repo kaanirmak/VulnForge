@@ -138,7 +138,7 @@ class OrganizationData:
         with self.access('scan.read') as c:
             self._repo(c, repo)
             sql='''SELECT j.id,j.repo,j.kind,j.state,j.attempts,j.available_at,j.lease_until,
-                          j.last_error,j.created_at,j.finished_at
+                          j.created_at,j.finished_at
                    FROM jobs j JOIN repository_ownership o ON o.repo=j.repo
                    WHERE o.organization_id=?'''
             args=[self.organization_id]
@@ -191,10 +191,10 @@ class OrganizationData:
 
             # A queued job is operational state, not scan evidence. Keeping it
             # separate prevents the dashboard from presenting a request as a scan.
-            job_row = c.execute('''SELECT id,kind,state,attempts,created_at,finished_at,last_error
+            job_row = c.execute('''SELECT id,kind,state,attempts,created_at,finished_at
                                    FROM jobs WHERE repo=? ORDER BY id DESC LIMIT 1''', (repo,)).fetchone()
             scan_delivery = None if job_row is None else {
-                key: job_row[key] for key in ('id', 'kind', 'state', 'attempts', 'created_at', 'finished_at', 'last_error')
+                key: job_row[key] for key in ('id', 'kind', 'state', 'attempts', 'created_at', 'finished_at')
             }
 
             # 2. Risk summary

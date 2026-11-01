@@ -101,7 +101,7 @@ def test_scan_jobs_are_scoped_and_hide_job_credentials(organizations):
     assert response.status_code==200
     job=response.json()['items'][0]
     assert job['repo']=='alpha/private-project' and job['state']=='pending'
-    assert 'payload' not in job and 'claim_token' not in job and 'connection_id' not in job
+    assert 'payload' not in job and 'claim_token' not in job and 'connection_id' not in job and 'last_error' not in job
     assert client.get(root+'/scan-jobs',params={'repo':'bravo/private-project'}).status_code==404
 
 
