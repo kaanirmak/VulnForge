@@ -49,8 +49,7 @@ def seed(store):
 def config(store):
     return Config(database_path=store.path,admin_token='operator-only',operator_report_token='separate-report-operator',
                   github_oauth_client_id='Iv1.fixture',github_oauth_client_secret='fixture-only',public_origin=ORIGIN,
-                  allow_insecure_local_auth=True,customer_api_preview=True,scan_mode='managed',
-                  allow_managed_source_access=True,managed_scan_consent_id='fixture-consent')
+                  allow_insecure_local_auth=True,customer_api_preview=True)
 
 
 def client_for(app,store,cfg,user):
@@ -83,20 +82,25 @@ def test_preview_defaults_closed_and_cannot_be_enabled_for_public_origin(organiz
 
 
 def test_manual_scan_is_limited_to_workspace_administrators(organizations):
-    client,headers,root=actor(organizations,role='org_admin')
+    store,fixtures,cfg,_=organizations
+    app=create_app(replace(cfg,scan_mode='managed',allow_managed_source_access=True,
+                           managed_scan_consent_id='fixture-consent'),store)
+    client,headers,root=actor((store,fixtures,cfg,app),role='org_admin')
     queued=client.post(root+'/scans/run',params={'repo':'alpha/private-project'},headers=headers)
     assert queued.status_code==202 and queued.json()=={'queued':True}
-    maintainer,maintainer_headers,_=actor(organizations,role='maintainer')
+    maintainer,maintainer_headers,_=actor((store,fixtures,cfg,app),role='maintainer')
     denied=maintainer.post(root+'/scans/run',params={'repo':'alpha/private-project'},headers=maintainer_headers)
     assert denied.status_code==403
-    store=organizations[0]
     with store.conn() as c:
         event=c.execute("SELECT actor,action,details FROM audit_events WHERE repo=? ORDER BY id DESC LIMIT 1",('alpha/private-project',)).fetchone()
     assert event['action']=='manual_scan_queued' and event['actor'].startswith('user:')
 
 
 def test_scan_jobs_are_scoped_and_hide_job_credentials(organizations):
-    client,headers,root=actor(organizations)
+    store,fixtures,cfg,_=organizations
+    app=create_app(replace(cfg,scan_mode='managed',allow_managed_source_access=True,
+                           managed_scan_consent_id='fixture-consent'),store)
+    client,headers,root=actor((store,fixtures,cfg,app))
     assert client.post(root+'/scans/run',params={'repo':'alpha/private-project'},headers=headers).status_code==202
     response=client.get(root+'/scan-jobs')
     assert response.status_code==200
