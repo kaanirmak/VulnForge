@@ -128,7 +128,11 @@ class OrganizationData:
     def request_scan(self, repo):
         with self.access('scan.start') as c:
             self._repo(c, repo)
-            return self.store.enqueue('dependency_audit', repo, {}, f'manual:{repo}:{int(time.time())}')
+            queued=self.store.enqueue('dependency_audit', repo, {}, f'manual:{repo}:{int(time.time())}')
+            self.store.audit_event(repo,None,'user:'+self.user_id,
+                                   'manual_scan_queued' if queued else 'manual_scan_deduplicated',
+                                   {'organization_id':self.organization_id,'trigger':'manual'})
+            return queued
 
     def scan_jobs(self, repo=None, limit=50):
         with self.access('scan.read') as c:

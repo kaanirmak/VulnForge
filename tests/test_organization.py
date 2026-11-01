@@ -88,6 +88,10 @@ def test_manual_scan_is_limited_to_workspace_administrators(organizations):
     maintainer,maintainer_headers,_=actor(organizations,role='maintainer')
     denied=maintainer.post(root+'/scans/run',params={'repo':'alpha/private-project'},headers=maintainer_headers)
     assert denied.status_code==403
+    store=organizations[0]
+    with store.conn() as c:
+        event=c.execute("SELECT actor,action,details FROM audit_events WHERE repo=? ORDER BY id DESC LIMIT 1",('alpha/private-project',)).fetchone()
+    assert event['action']=='manual_scan_queued' and event['actor'].startswith('user:')
 
 
 def test_scan_jobs_are_scoped_and_hide_job_credentials(organizations):
