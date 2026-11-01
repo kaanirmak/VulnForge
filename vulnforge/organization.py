@@ -126,7 +126,7 @@ class OrganizationData:
             }
 
     def request_scan(self, repo):
-        with self.access('project.read') as c:
+        with self.access('scan.start') as c:
             self._repo(c, repo)
             return self.store.enqueue('dependency_audit', repo, {}, f'manual:{repo}:{int(time.time())}')
 

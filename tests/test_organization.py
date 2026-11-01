@@ -81,6 +81,15 @@ def test_preview_defaults_closed_and_cannot_be_enabled_for_public_origin(organiz
     assert Config().customer_api_preview is False
 
 
+def test_manual_scan_is_limited_to_workspace_administrators(organizations):
+    client,headers,root=actor(organizations,role='org_admin')
+    queued=client.post(root+'/scans/run',params={'repo':'alpha/private-project'},headers=headers)
+    assert queued.status_code==202 and queued.json()=={'queued':True}
+    maintainer,maintainer_headers,_=actor(organizations,role='maintainer')
+    denied=maintainer.post(root+'/scans/run',params={'repo':'alpha/private-project'},headers=maintainer_headers)
+    assert denied.status_code==403
+
+
 @pytest.mark.parametrize('role',['org_admin','maintainer','analyst','viewer','auditor'])
 def test_all_read_roles_are_scoped_to_their_organization(organizations,role):
     client,_,root=actor(organizations,role=role)
