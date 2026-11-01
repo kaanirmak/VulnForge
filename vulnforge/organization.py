@@ -104,10 +104,22 @@ class OrganizationData:
             sql, args = self.query('findings', 'COUNT(*)')
             finding_count = c.execute(sql, args).fetchone()[0]
 
+            # A repository connection alone cannot produce a trustworthy scan in
+            # customer-runner mode. Surface this as an explicit onboarding gate.
+            runner_count = 0
+            try:
+                runner_count = c.execute('''SELECT COUNT(*) FROM runner_policies p
+                    JOIN repository_ownership o ON o.repo=p.repo AND o.organization_id=p.organization_id
+                    WHERE p.organization_id=? AND p.enabled=1''', (self.organization_id,)).fetchone()[0]
+            except Exception:
+                runner_count = 0
+
             install_status = 'installed' if repo_count > 0 else 'pending_setup'
             steps = [
                 {'step': 'create_organization', 'title': 'Kuruluş oluştur', 'completed': True},
                 {'step': 'connect_repository', 'title': 'GitHub projesi bağla', 'completed': repo_count > 0},
+                {'step': 'configure_runner', 'title': 'GitHub Actions koşucusunu doğrula',
+                 'completed': repo_count > 0 and runner_count >= repo_count},
                 {'step': 'run_initial_scan', 'title': 'İlk taramayı tamamla', 'completed': scan_count > 0},
                 {'step': 'review_findings', 'title': 'Güvenlik bulgularını incele', 'completed': scan_count > 0}
             ]
@@ -121,6 +133,7 @@ class OrganizationData:
                 'total_steps': len(steps),
                 'next_step': next_step,
                 'repo_count': repo_count,
+                'runner_count': runner_count,
                 'scan_count': scan_count,
                 'finding_count': finding_count
             }

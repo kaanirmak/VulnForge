@@ -9,7 +9,8 @@ def test_onboarding_endpoint(organizations):
     data = res.json()
     assert data['installation_status'] in ('installed', 'pending_setup')
     assert data['steps_completed'] >= 1
-    assert data['total_steps'] == 4
+    assert data['total_steps'] == 5
+    assert data['runner_count'] == 0
     assert any(s['step'] == 'create_organization' and s['completed'] is True for s in data['steps'])
 
 
