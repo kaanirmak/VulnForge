@@ -54,6 +54,8 @@ Zamanlayıcı → son doğrulanmış bağımlılık envanteri → yeni advisory 
 Hedef proje URL'si: `https://xsnivuaurhwezlaxuvro.supabase.co`.
 Publishable anahtar kullanıcı tarafından sağlandı; bu dosyada çoğaltılmaz. Proje şeması veya bağlantısının doğrulandığı henüz iddia edilmez.
 
+Supabase proje URL'si ve publishable anahtarı yalnız istemci yapılandırmasıdır. Mevcut Python API'nin migration, operator, customer ve worker bağlantıları için ayrı PostgreSQL URI'leri gerekir; bunlar `DATABASE_URL`, `CUSTOMER_DATABASE_URL` ve `WORKER_DATABASE_URL` olarak korunmuş ortamda verilir. GitHub kullanıcı girişi devam eder; Supabase Auth kurulmaz.
+
 - [ ] Supabase proje erişimini mevcut bağlantı araçlarıyla doğrula.
 - [ ] Backend için PostgreSQL bağlantısını güvenli ortam ayarına ekle; public anahtarı DB parolası olarak kullanma.
 - [ ] Geliştirme, staging ve production ortamlarını ayır.
