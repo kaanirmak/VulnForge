@@ -161,6 +161,12 @@ def test_project_health_data_method(tmp_path):
     assert conn['installation_id'] == 42
     assert conn['default_branch'] == 'main'
     assert conn['last_sha'] == 'a' * 40
+    assert health['scan_delivery'] is None
+
+    assert store.enqueue('dependency_audit', repo, {}, 'project-health-queue')
+    queued_health = org_data.project_health(repo)
+    assert queued_health['scan_delivery']['state'] == 'pending'
+    assert queued_health['scan_delivery']['kind'] == 'dependency_audit'
 
     # Foreign repo raises ResourceNotFound
     with pytest.raises(ResourceNotFound):

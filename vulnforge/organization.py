@@ -189,6 +189,14 @@ class OrganizationData:
                 'last_sync_at': repo_row['updated_at']
             }
 
+            # A queued job is operational state, not scan evidence. Keeping it
+            # separate prevents the dashboard from presenting a request as a scan.
+            job_row = c.execute('''SELECT id,kind,state,attempts,created_at,finished_at,last_error
+                                   FROM jobs WHERE repo=? ORDER BY id DESC LIMIT 1''', (repo,)).fetchone()
+            scan_delivery = None if job_row is None else {
+                key: job_row[key] for key in ('id', 'kind', 'state', 'attempts', 'created_at', 'finished_at', 'last_error')
+            }
+
             # 2. Risk summary
             sql, args = self.query('findings', 'x.severity, x.status')
             findings_rows = c.execute(sql + ' AND x.repo=?', args + [repo]).fetchall()
@@ -297,7 +305,8 @@ class OrganizationData:
                 'latest_scan': latest_scan,
                 'coverage': coverage_data,
                 'intelligence_freshness': intelligence_freshness,
-                'connection_health': connection_health
+                'connection_health': connection_health,
+                'scan_delivery': scan_delivery
             }
 
     def finding(self, finding_id: int) -> dict:
