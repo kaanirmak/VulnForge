@@ -13,7 +13,8 @@ ENV_KEYS=frozenset('''WEBHOOK_SECRET ADMIN_TOKEN OPERATOR_CREDENTIALS GITHUB_APP
     MANAGED_SCAN_CONSENT_ID INTELLIGENCE_MODE ALLOW_EXTERNAL_PACKAGE_METADATA OSV_ALLOWED_PACKAGES
     PRIVATE_PACKAGE_PATTERNS OPERATOR_REPORT_TOKEN GITHUB_OAUTH_CLIENT_ID GITHUB_OAUTH_CLIENT_SECRET
     PUBLIC_ORIGIN ALLOW_INSECURE_LOCAL_AUTH CUSTOMER_API_PREVIEW GITHUB_CONNECTION_PREVIEW
-    RUNNER_OIDC_PREVIEW RUNNER_TRUSTED_WORKFLOWS GITHUB_APP_KEY_FILE'''.split())
+    RUNNER_OIDC_PREVIEW RUNNER_TRUSTED_WORKFLOWS GITHUB_APP_KEY_FILE SUPABASE_URL SUPABASE_PUBLISHABLE_KEY
+    NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY'''.split())
 
 
 def private_read(path,limit):
@@ -70,6 +71,7 @@ def inspect(cfg):
         'callback_urls':[cfg.public_origin+path for path in ('/auth/github/callback','/auth/github/connect/callback')]
             if cfg.public_origin else [],
         'database_kind':'postgresql' if cfg.database_target.startswith(('postgres://','postgresql://')) else 'local_sqlite',
+        'supabase_configured':bool(cfg.supabase_url and cfg.supabase_publishable_key),
         'database_roles_verified':False,'app_permissions_verified':False,'live_acceptance_verified':False,
         'production_ready':False,'customer_ingestion_ready':False,
         'open_release_gates':['worker_database_and_private_catalog_isolation','verified_runner_baseline',

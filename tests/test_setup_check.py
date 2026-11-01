@@ -51,6 +51,16 @@ def test_quoted_json_operator_credentials_and_no_interpolation(tmp_path):
     assert cfg.operator_credentials==(('admin','a'*48),) and cfg.scan_mode=='customer_runner'
 
 
+def test_supabase_public_configuration_is_accepted_without_echoing_key(tmp_path):
+    key='sb_publishable_'+'a'*32
+    file=tmp_path/'.env';file.write_text('NEXT_PUBLIC_SUPABASE_URL=https://example.supabase.co\nNEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY='+key+'\n')
+    file.chmod(0o600)
+    cfg=Config.from_env(read_env(str(file)))
+    assert cfg.supabase_url=='https://example.supabase.co'
+    assert cfg.supabase_publishable_key==key
+    assert inspect(cfg)['supabase_configured'] is True
+
+
 @pytest.mark.parametrize('kind',['public_permissions','symlink','large','invalid_config'])
 def test_bad_env_files_fail_without_printing_values(tmp_path,capsys,kind):
     target=tmp_path/'target';target.write_text('ADMIN_TOKEN=do-not-echo-this-secret');target.chmod(0o600)

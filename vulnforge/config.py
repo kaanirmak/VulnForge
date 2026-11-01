@@ -47,6 +47,8 @@ class Config:
     github_connection_preview: bool = False
     runner_oidc_preview: bool = False
     runner_trusted_workflows: tuple[str,...] = ()
+    supabase_url: str = ''
+    supabase_publishable_key: str = field(default='',repr=False)
 
     def __post_init__(self):
         if self.environment not in ('development', 'staging', 'production'):
@@ -127,6 +129,15 @@ class Config:
         if self.runner_oidc_preview and (not self.customer_api_preview or not self.runner_trusted_workflows or
             self.scan_mode!='customer_runner'):
             raise ValueError('Runner identity preview requires loopback customer-runner mode and trusted workflows')
+        if bool(self.supabase_url)!=bool(self.supabase_publishable_key):
+            raise ValueError('Supabase requires both URL and publishable key')
+        if self.supabase_url:
+            parsed=urlsplit(self.supabase_url)
+            if (parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or
+                parsed.path or parsed.query or parsed.fragment or any(c.isspace() for c in self.supabase_url)):
+                raise ValueError('Supabase URL must be an HTTPS origin without a path or query')
+            if not re.fullmatch(r'[A-Za-z0-9._~-]{16,4096}',self.supabase_publishable_key):
+                raise ValueError('Invalid Supabase publishable key')
 
     @property
     def is_production(self) -> bool:
@@ -210,6 +221,8 @@ class Config:
             github_connection_preview=getenv('GITHUB_CONNECTION_PREVIEW','false').lower()=='true',
             runner_oidc_preview=getenv('RUNNER_OIDC_PREVIEW','false').lower()=='true',
             runner_trusted_workflows=tuple(v.strip() for v in getenv('RUNNER_TRUSTED_WORKFLOWS','').split(',') if v.strip()),
+            supabase_url=getenv('SUPABASE_URL',getenv('NEXT_PUBLIC_SUPABASE_URL','')),
+            supabase_publishable_key=getenv('SUPABASE_PUBLISHABLE_KEY',getenv('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','')),
         )
 
     def private_key(self) -> str:
