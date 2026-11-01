@@ -47,10 +47,11 @@ dd{margin:4px 0 16px;overflow-wrap:anywhere;font-size:12px}.dialog-head>div{min-
 const byId=id=>document.getElementById(id),status=byId('status'),login=byId('login'),logout=byId('logout');
 let organizations=[],generation=0,connectionEnabled=false,signedIn=false;
 let currentPage='overview',projectItems=[],repositoryOptions=[];
-let scanStartedAt=0,scanTimer=null;
+let scanPoll=null;
 const pageInfo={scans:['Taramalar','Tarama geçmişi, kapsam bilgileri ve raporlar.'],overview:['Genel bakış','Projelerin, güvenlik durumu ve sıradaki adımlar.'],projects:['Projeler','GitHub projelerini bağla ve tarama kapsamını takip et.'],findings:['Güvenlik bulguları','Önceliklendir, incele ve bulguların durumunu takip et.'],impacts:['Proje etkisi','Yeni güvenlik açıklarının projelerine etkisini incele.'],remediations:['Düzeltmeler','Yama planları, onaylar ve doğrulama sonuçları.'],settings:['Ayarlar ve erişim','Çalışma alanını ve GitHub bağlantılarını yönet.']};
 function setPage(page){
   currentPage=pageInfo[page]?page:'overview';
+  if(currentPage!=='scans'){clearInterval(scanPoll);scanPoll=null;}
   for(const element of document.querySelectorAll('[data-view]'))element.hidden=!element.dataset.view.split(' ').includes(currentPage)||(element.id==='onboarding-checklist'&&element.dataset.complete==='true');
   for(const button of document.querySelectorAll('[data-page]')){if(button.dataset.page===currentPage)button.setAttribute('aria-current','page');else button.removeAttribute('aria-current');}
   byId('page-title').textContent=pageInfo[currentPage][0];byId('breadcrumb-page').textContent=pageInfo[currentPage][0];byId('page-description').textContent=pageInfo[currentPage][1];
@@ -58,6 +59,16 @@ function setPage(page){
   location.hash=currentPage;
 }
 function textElement(tag,text,className){const el=document.createElement(tag);el.textContent=text;if(className)el.className=className;return el;}
+function renderScanQueue(jobs){
+  const active=jobs.find(job=>job.state==='pending'||job.state==='running');
+  const latest=active||jobs[0];
+  if(!latest){byId('scan-progress').textContent='Tarama kuyruğu boş. Bir tarama başlattığında gerçek durum burada görünür.';clearInterval(scanPoll);scanPoll=null;return;}
+  const messages={pending:'Tarama kuyruğa alındı · runner işi henüz almadı.',running:'Tarama çalışıyor · runner iş üzerinde.',done:'Kuyruk işi tamamlandı · raporlar kontrol ediliyor.',failed:'Tarama işi başarısız · ayrıntı için yeniden dene veya runner kaydını incele.',cancelled:'Tarama işi iptal edildi.'};
+  const age=Math.max(0,Math.floor(Date.now()/1000-latest.created_at));
+  byId('scan-progress').textContent=(messages[latest.state]||'Tarama işi güncelleniyor.')+' Geçen süre: '+Math.floor(age/60)+' dk '+String(age%60).padStart(2,'0')+' sn';
+  if(active&&currentPage==='scans'&&!scanPoll)scanPoll=setInterval(()=>loadWorkspace(),5000);
+  if(!active){clearInterval(scanPoll);scanPoll=null;}
+}
 function renderProjects(){
   const host=byId('repositories');host.replaceChildren();
   const query=byId('project-search').value.toLocaleLowerCase('tr');
@@ -281,13 +292,14 @@ async function loadWorkspace(){
       api(root+'/overview'),
       api(root+'/repositories'),
       api(root+'/scans'),
+      api(root+'/scan-jobs'),
       api(root+'/impacts'),
       api(root+'/findings'+(severity?'?severity='+encodeURIComponent(severity):'')),
       api(root+'/onboarding'),
       api(root+'/remediations')
     ]);
     if(current!==generation)return;
-    const [overview,repos,scans,impacts,findings,onboarding,remediations]=results;
+    const [overview,repos,scans,scanJobs,impacts,findings,onboarding,remediations]=results;
 
     byId('onboarding-checklist').dataset.complete=String(onboarding.steps_completed===onboarding.total_steps);
     byId('onboarding-steps').replaceChildren();
@@ -308,6 +320,7 @@ async function loadWorkspace(){
       if(scan.state!=='running'){for(const kind of ['sarif',...(['dependencies','pr_dependencies'].includes(scan.kind)?['sbom']:[])]){const b=textElement('button',kind.toUpperCase());b.addEventListener('click',()=>downloadScan(scan.id,kind,selected));exports.append(b);}}
       return [scan.repo,['dependencies','pr_dependencies'].includes(scan.kind)?'Bağımlılıklar':'Kod',states[scan.state]||scan.state,scan.commit_sha?.slice(0,12)||'—',date(scan.started_at),exports];
     }),'Henüz tarama kaydı yok. Bağlı projelerin ilk koşucu raporu bekleniyor.');
+    renderScanQueue(scanJobs.items);
     const scanButton=byId('run-scan');
     scanButton.disabled=!isAdmin||!repos.items.length;
     scanButton.title=isAdmin?'Bağlı projenin bağımlılık taramasını kuyruğa alır':'Bu işlem için çalışma alanı yöneticisi olmalısın';
@@ -468,9 +481,9 @@ byId('run-scan').addEventListener('click',async()=>{
   const button=byId('run-scan');
   const repo=projectItems[0]?.full_name;
   if(!repo)return;
-  button.disabled=true;scanStartedAt=Date.now();clearInterval(scanTimer);scanTimer=setInterval(()=>{const sec=Math.floor((Date.now()-scanStartedAt)/1000);byId('scan-progress').textContent='Tarama kuyruğa alındı · geçen süre '+Math.floor(sec/60)+' dk '+String(sec%60).padStart(2,'0')+' sn';},1000);byId('scan-progress').textContent='Tarama kuyruğa alındı · worker bekleniyor…';byId('export-status').textContent='Rapor hazırlanıyor; bu ekranı kapatmana gerek yok.';
-  try{const result=await mutate('/api/v1/organizations/'+encodeURIComponent(byId('organization').value)+'/scans/run?repo='+encodeURIComponent(repo),null);byId('export-status').textContent=result.queued?'Tarama çalışmaya başladı. Sonuçlar hazır olduğunda liste yenilenecek.':'Bu proje için zaten bekleyen bir tarama var.';await loadWorkspace();}
-  catch{clearInterval(scanTimer);byId('scan-progress').textContent='Tarama başlatılamadı; yeniden deneyebilirsin.';byId('export-status').textContent='Runner hazır değil veya proje bağlantısı doğrulanamadı.';button.disabled=false;}
+  button.disabled=true;byId('scan-progress').textContent='Tarama isteği kaydediliyor…';byId('export-status').textContent='Kuyruk durumu doğrulanıyor.';
+  try{const result=await mutate('/api/v1/organizations/'+encodeURIComponent(byId('organization').value)+'/scans/run?repo='+encodeURIComponent(repo),null);byId('export-status').textContent=result.queued?'Tarama isteği kuyruğa alındı. Runner işi aldığında durum güncellenecek.':'Bu proje için zaten bekleyen bir tarama var.';await loadWorkspace();}
+  catch{byId('scan-progress').textContent='Tarama başlatılamadı; yeniden deneyebilirsin.';byId('export-status').textContent='İstek kaydedilemedi. Proje bağlantısını ve yönetici yetkini kontrol et.';button.disabled=false;}
 });
 for(const button of document.querySelectorAll('[data-page]'))button.addEventListener('click',()=>setPage(button.dataset.page));
 window.addEventListener('hashchange',()=>setPage(location.hash.slice(1)));
