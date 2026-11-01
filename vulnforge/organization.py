@@ -130,6 +130,19 @@ class OrganizationData:
             self._repo(c, repo)
             return self.store.enqueue('dependency_audit', repo, {}, f'manual:{repo}:{int(time.time())}')
 
+    def scan_jobs(self, repo=None, limit=50):
+        with self.access('scan.read') as c:
+            self._repo(c, repo)
+            sql='''SELECT j.id,j.repo,j.kind,j.state,j.attempts,j.available_at,j.lease_until,
+                          j.last_error,j.created_at,j.finished_at
+                   FROM jobs j JOIN repository_ownership o ON o.repo=j.repo
+                   WHERE o.organization_id=?'''
+            args=[self.organization_id]
+            if repo is not None:
+                sql+=' AND j.repo=?';args.append(repo)
+            sql+=' ORDER BY j.id DESC LIMIT ?';args.append(limit)
+            return [dict(row) for row in c.execute(sql,args).fetchall()]
+
     def project_health(self, repo: str) -> dict:
         with self.access('project.read') as c:
             self._repo(c, repo)

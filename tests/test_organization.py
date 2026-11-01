@@ -90,13 +90,24 @@ def test_manual_scan_is_limited_to_workspace_administrators(organizations):
     assert denied.status_code==403
 
 
+def test_scan_jobs_are_scoped_and_hide_job_credentials(organizations):
+    client,headers,root=actor(organizations)
+    assert client.post(root+'/scans/run',params={'repo':'alpha/private-project'},headers=headers).status_code==202
+    response=client.get(root+'/scan-jobs')
+    assert response.status_code==200
+    job=response.json()['items'][0]
+    assert job['repo']=='alpha/private-project' and job['state']=='pending'
+    assert 'payload' not in job and 'claim_token' not in job and 'connection_id' not in job
+    assert client.get(root+'/scan-jobs',params={'repo':'bravo/private-project'}).status_code==404
+
+
 @pytest.mark.parametrize('role',['org_admin','maintainer','analyst','viewer','auditor'])
 def test_all_read_roles_are_scoped_to_their_organization(organizations,role):
     client,_,root=actor(organizations,role=role)
     store,(members,orgs,repos,scans,findings),cfg,app=organizations
     mine=client.get(ROOT).json()['items']
     assert [row['id'] for row in mine]==[orgs['alpha']]
-    for path in ('/overview','/repositories','/findings','/dependencies','/remediations','/scans','/impacts','/advisories',
+    for path in ('/overview','/repositories','/findings','/dependencies','/remediations','/scans','/scan-jobs','/impacts','/advisories',
                  '/scans/'+scans['alpha'],'/scans/'+scans['alpha']+'/sarif','/scans/'+scans['alpha']+'/sbom'):
         response=client.get(root+path)
         assert response.status_code==200,(path,response.text)
