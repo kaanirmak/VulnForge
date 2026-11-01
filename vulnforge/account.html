@@ -124,7 +124,7 @@ function githubRedirect(result){
   location.assign(target.href);
 }
 const roles={org_admin:'Kuruluş yöneticisi',maintainer:'Proje sorumlusu',analyst:'Analist',viewer:'Görüntüleyici',auditor:'Denetçi'};
-const states={complete:'Tamamlandı (belirtilen kapsam)',incomplete:'Kısmi tarama',failed:'Tarama başarısız',running:'Tarama sürüyor',affected:'Etkileniyor',under_investigation:'İnceleniyor',not_affected:'Bu sürüm etkilenmiyor',withdrawn:'Duyuru geri çekildi',open:'Açık',resolved:'Çözüldü',false_positive:'Yanlış pozitif',risk_accepted:'Süreli risk kabulü',suppressed:'Süreli bastırma'};
+const states={complete:'Tamamlandı (belirtilen kapsam)',incomplete:'Kısmi tarama',pending:'Kuyrukta',done:'Kuyruk işi tamamlandı',cancelled:'İptal edildi',failed:'Tarama başarısız',running:'Tarama sürüyor',affected:'Etkileniyor',under_investigation:'İnceleniyor',not_affected:'Bu sürüm etkilenmiyor',withdrawn:'Duyuru geri çekildi',open:'Açık',resolved:'Çözüldü',false_positive:'Yanlış pozitif',risk_accepted:'Süreli risk kabulü',suppressed:'Süreli bastırma'};
 const remStates={pending_approval:'Onay bekliyor',validated:'Doğrulandı (Onaylı)',blocked:'Engellendi',published:'Yayımlandı'};
 
 function empty(id,message,isEmptyState=false){
@@ -226,7 +226,8 @@ async function openProjectHealth(repo){
     if(org!==byId('organization').value)return;
     host.replaceChildren();
     const list=textElement('dl','');
-    for(const [label,value] of [['GitHub bağlantısı',health.connection_health.status==='connected'?'Bağlı':'Bekleniyor'],['Varsayılan dal',health.connection_health.default_branch],['Son tarama',health.latest_scan?states[health.latest_scan.state]||health.latest_scan.state:'Henüz tarama yok'],['Kapsam',health.latest_scan?health.coverage.files_scanned+' / '+health.coverage.files_total+' dosya':'İlk koşucu raporu bekleniyor'],['Kanıt tazeliği',evidence(health.intelligence_freshness)],['Açık bulgular',health.latest_scan?health.risk_summary.open_findings:'Tarama olmadan değerlendirilemez']]){list.append(textElement('dt',label,'muted small'),textElement('dd',String(value??'Bilinmiyor')));}
+    const delivery=health.scan_delivery;
+    for(const [label,value] of [['GitHub bağlantısı',health.connection_health.status==='connected'?'Bağlı':'Bekleniyor'],['Varsayılan dal',health.connection_health.default_branch],['Koşucu durumu',delivery?(states[delivery.state]||delivery.state)+' · '+date(delivery.created_at):'İş beklemiyor'],['Son tarama',health.latest_scan?states[health.latest_scan.state]||health.latest_scan.state:'Henüz tarama yok'],['Kapsam',health.latest_scan?health.coverage.files_scanned+' / '+health.coverage.files_total+' dosya':'İlk koşucu raporu bekleniyor'],['Kanıt tazeliği',evidence(health.intelligence_freshness)],['Açık bulgular',health.latest_scan?health.risk_summary.open_findings:'Tarama olmadan değerlendirilemez']]){list.append(textElement('dt',label,'muted small'),textElement('dd',String(value??'Bilinmiyor')));}
     host.append(list);const scansButton=textElement('button','Tarama geçmişini aç');scansButton.addEventListener('click',()=>{byId('health-dialog').close();setPage('scans');});host.append(scansButton);
   }catch{host.textContent='Proje ayrıntıları alınamadı. Yetkini ve bağlantıyı kontrol edip yeniden dene.';}
 }
