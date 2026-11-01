@@ -147,6 +147,11 @@ class OrganizationData:
                                    {'organization_id':self.organization_id,'trigger':'manual'})
             return queued
 
+    def scan_capability(self, repo):
+        """Verify that the caller can see this repository before capability is disclosed."""
+        with self.access('scan.read') as c:
+            self._repo(c, repo)
+
     def scan_jobs(self, repo=None, limit=50):
         with self.access('scan.read') as c:
             self._repo(c, repo)

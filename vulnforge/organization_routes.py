@@ -516,9 +516,26 @@ def install_organization_routes(app,cfg,store):
         try: return {'items':data.scan_jobs(repo,limit)}
         except LookupError: raise HTTPException(404,'Repository not found') from None
 
+    @router.get('/scans/capability')
+    async def scan_capability(repo:str=Query(...),data=Depends(scoped)):
+        try:
+            data.scan_capability(repo)
+        except LookupError: raise HTTPException(404,'Repository not found') from None
+        available=cfg.source_access_allowed
+        return {
+            'available': available,
+            'mode': cfg.scan_mode,
+            'reason': None if available else
+                'Bu projede manuel dispatch henüz yapılandırılmadı. GitHub Actions koşucusunu doğrula ve ilk raporu gönder.'
+        }
+
     @router.post('/scans/run',dependencies=[Depends(csrf)],status_code=202)
     async def run_scan(repo:str=Query(...),data=Depends(scoped)):
-        try: return {'queued':bool(data.request_scan(repo))}
+        try:
+            data.scan_capability(repo)
+            if not cfg.source_access_allowed:
+                raise HTTPException(409,'Manual dispatch is not configured; verify the GitHub Actions runner first')
+            return {'queued':bool(data.request_scan(repo))}
         except LookupError: raise HTTPException(404,'Repository not found') from None
 
     @router.get('/scans/{scan_id}')

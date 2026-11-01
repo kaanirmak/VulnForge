@@ -47,7 +47,7 @@ dd{margin:4px 0 16px;overflow-wrap:anywhere;font-size:12px}.dialog-head>div{min-
 const byId=id=>document.getElementById(id),status=byId('status'),login=byId('login'),logout=byId('logout');
 let organizations=[],generation=0,connectionEnabled=false,signedIn=false;
 let currentPage='overview',projectItems=[],repositoryOptions=[];
-let scanPoll=null;
+let scanPoll=null,scanAvailable=false,isAdmin=false;
 const pageInfo={scans:['Taramalar','Tarama geçmişi, kapsam bilgileri ve raporlar.'],overview:['Genel bakış','Projelerin, güvenlik durumu ve sıradaki adımlar.'],projects:['Projeler','GitHub projelerini bağla ve tarama kapsamını takip et.'],findings:['Güvenlik bulguları','Önceliklendir, incele ve bulguların durumunu takip et.'],impacts:['Proje etkisi','Yeni güvenlik açıklarının projelerine etkisini incele.'],remediations:['Düzeltmeler','Yama planları, onaylar ve doğrulama sonuçları.'],settings:['Ayarlar ve erişim','Çalışma alanını ve GitHub bağlantılarını yönet.']};
 function setPage(page){
   currentPage=pageInfo[page]?page:'overview';
@@ -92,6 +92,19 @@ function renderScanProjects(){
   for(const repo of projectItems){const option=textElement('option',repo.full_name);option.value=repo.full_name;select.append(option);}
   select.value=projectItems.some(repo=>repo.full_name===previous)?previous:projectItems[0].full_name;
   select.disabled=false;
+}
+async function refreshScanCapability(){
+  const repo=byId('scan-repo').value,button=byId('run-scan'),org=byId('organization').value;
+  scanAvailable=false;
+  if(!repo||!org){button.disabled=true;return;}
+  try{
+    const capability=await api('/api/v1/organizations/'+encodeURIComponent(org)+'/scans/capability?repo='+encodeURIComponent(repo));
+    if(org!==byId('organization').value||repo!==byId('scan-repo').value)return;
+    scanAvailable=capability.available;
+    button.disabled=!isAdmin||!scanAvailable;
+    button.title=scanAvailable?(isAdmin?'Bağlı projenin bağımlılık taramasını kuyruğa alır':'Bu işlem için çalışma alanı yöneticisi olmalısın'):(capability.reason||'Tarama başlatılamaz');
+    if(!scanAvailable)byId('scan-progress').textContent=capability.reason||'Tarama koşucusu hazır değil.';
+  }catch{button.disabled=true;button.title='Tarama yetkisi doğrulanamadı';}
 }
 function renderChoices(){
   const select=byId('connection-repo');const previous=select.value;select.replaceChildren();
@@ -292,7 +305,7 @@ async function loadWorkspace(){
   const root='/api/v1/organizations/'+encodeURIComponent(selected);
   const userOrg=organizations.find(o=>o.id===selected);
   byId('role').textContent=roles[userOrg?.role]||'';
-  const isAdmin=userOrg?.role==='org_admin';
+  isAdmin=userOrg?.role==='org_admin';
 
   try{
     const severity=byId('severity').value;
@@ -329,9 +342,7 @@ async function loadWorkspace(){
       return [scan.repo,['dependencies','pr_dependencies'].includes(scan.kind)?'Bağımlılıklar':'Kod',states[scan.state]||scan.state,scan.commit_sha?.slice(0,12)||'—',date(scan.started_at),exports];
     }),'Henüz tarama kaydı yok. Bağlı projelerin ilk koşucu raporu bekleniyor.');
     renderScanQueue(scanJobs.items);
-    const scanButton=byId('run-scan');
-    scanButton.disabled=!isAdmin||!byId('scan-repo').value;
-    scanButton.title=isAdmin?'Bağlı projenin bağımlılık taramasını kuyruğa alır':'Bu işlem için çalışma alanı yöneticisi olmalısın';
+    await refreshScanCapability();
     byId('finding-detail').hidden=true;
     table('findings',['Önem','Bulgu','Proje','Durum'],findings.items.map(f=>[
       ({critical:'Kritik',high:'Yüksek',medium:'Orta',low:'Düşük',info:'Bilgi'})[f.severity]||'Bilinmiyor',
@@ -485,13 +496,14 @@ logout.addEventListener('click',async()=>{
 byId('organization').addEventListener('change',()=>{sessionStorage.setItem('vf_selected_org',byId('organization').value);byId('project-search').value='';byId('project-dialog').close();loadWorkspace();});
 byId('refresh').addEventListener('click',loadWorkspace);
 byId('severity').addEventListener('change',loadWorkspace);
+byId('scan-repo').addEventListener('change',refreshScanCapability);
 byId('run-scan').addEventListener('click',async()=>{
   const button=byId('run-scan');
   const repo=byId('scan-repo').value;
   if(!repo)return;
   button.disabled=true;byId('scan-progress').textContent='Tarama isteği kaydediliyor…';byId('export-status').textContent='Kuyruk durumu doğrulanıyor.';
   try{const result=await mutate('/api/v1/organizations/'+encodeURIComponent(byId('organization').value)+'/scans/run?repo='+encodeURIComponent(repo),null);byId('export-status').textContent=result.queued?'Tarama isteği kuyruğa alındı. Runner işi aldığında durum güncellenecek.':'Bu proje için zaten bekleyen bir tarama var.';await loadWorkspace();}
-  catch{byId('scan-progress').textContent='Tarama başlatılamadı; yeniden deneyebilirsin.';byId('export-status').textContent='İstek kaydedilemedi. Proje bağlantısını ve yönetici yetkini kontrol et.';button.disabled=false;}
+  catch{byId('scan-progress').textContent='Tarama başlatılamadı; koşucu kurulumu ve yönetici yetkisi gerekli.';byId('export-status').textContent='İstek kaydedilemedi. GitHub Actions koşucusunu doğrulayıp yeniden dene.';button.disabled=!scanAvailable;}
 });
 for(const button of document.querySelectorAll('[data-page]'))button.addEventListener('click',()=>setPage(button.dataset.page));
 window.addEventListener('hashchange',()=>setPage(location.hash.slice(1)));

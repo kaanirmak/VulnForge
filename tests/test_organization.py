@@ -49,7 +49,8 @@ def seed(store):
 def config(store):
     return Config(database_path=store.path,admin_token='operator-only',operator_report_token='separate-report-operator',
                   github_oauth_client_id='Iv1.fixture',github_oauth_client_secret='fixture-only',public_origin=ORIGIN,
-                  allow_insecure_local_auth=True,customer_api_preview=True)
+                  allow_insecure_local_auth=True,customer_api_preview=True,scan_mode='managed',
+                  allow_managed_source_access=True,managed_scan_consent_id='fixture-consent')
 
 
 def client_for(app,store,cfg,user):
@@ -103,6 +104,16 @@ def test_scan_jobs_are_scoped_and_hide_job_credentials(organizations):
     assert job['repo']=='alpha/private-project' and job['state']=='pending'
     assert 'payload' not in job and 'claim_token' not in job and 'connection_id' not in job and 'last_error' not in job
     assert client.get(root+'/scan-jobs',params={'repo':'bravo/private-project'}).status_code==404
+
+
+def test_manual_scan_capability_honestly_blocks_customer_runner_mode(organizations):
+    store,fixtures,cfg,_=organizations
+    app=create_app(replace(cfg,scan_mode='customer_runner',allow_managed_source_access=False,
+                           managed_scan_consent_id=''),store)
+    client,headers,root=actor((store,fixtures,cfg,app))
+    capability=client.get(root+'/scans/capability',params={'repo':'alpha/private-project'})
+    assert capability.status_code==200 and capability.json()['available'] is False
+    assert client.post(root+'/scans/run',params={'repo':'alpha/private-project'},headers=headers).status_code==409
 
 
 @pytest.mark.parametrize('role',['org_admin','maintainer','analyst','viewer','auditor'])
